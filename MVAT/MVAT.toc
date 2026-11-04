@@ -1,0 +1,10 @@
+## Interface: 11507, 11506, 20504, 40402
+## Title: |cff33ccffMVAT|r - Tutor de Combate
+## Notes: Assistente visual de reacao tatica e otimizacao de combate (100% informativo, sem automacao).
+## Notes-ptBR: Assistente visual de reacao tatica e otimizacao de combate (100% informativo, sem automacao).
+## Author: Cleyton
+## Version: 1.0.0
+## SavedVariables: MVAT_DB
+## DefaultState: enabled
+
+MVAT.lua
