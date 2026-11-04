@@ -1,4 +1,4 @@
-## Interface: 11507, 11506, 20504, 40402
+## Interface: 16001, 11509, 11508, 20506
 ## Title: |cff33ccffMVAT|r - Tutor de Combate
 ## Notes: Assistente visual de reacao tatica e otimizacao de combate (100% informativo, sem automacao).
 ## Notes-ptBR: Assistente visual de reacao tatica e otimizacao de combate (100% informativo, sem automacao).
