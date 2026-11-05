@@ -30,6 +30,8 @@ local DEFAULTS = {
     combatOnly = false,  -- true = so mostra em combate
     aoe = 3,             -- n. de inimigos para considerar "area / farm"
     showText = true,     -- mostra o motivo da sugestao abaixo do icone
+    barOnly = true,      -- so sugere habilidades que estao nas suas barras de acao
+    seal = "auto",       -- Paladino: "auto" escolhe o selo pelo contexto; ou fixe um selo
 }
 
 local DB -- preenchido no ADDON_LOADED
@@ -138,7 +140,7 @@ local function ForEachAura(unit, filter, fn)
             if not ok then return false end
             if not a or issecret(a) then return true end
             local name = Pub(a.name)
-            if name and fn(name, Pub(a.dispelName), Pub(a.sourceUnit), Pub(a.expirationTime), Pub(a.applications)) then
+            if name and fn(name, Pub(a.dispelName), Pub(a.sourceUnit), Pub(a.expirationTime), Pub(a.applications), Pub(a.duration)) then
                 return true
             end
         end
@@ -148,7 +150,7 @@ local function ForEachAura(unit, filter, fn)
             if not ok then return false end
             if name == nil then return true end
             name = Pub(name)
-            if name and fn(name, Pub(dtype), Pub(source), Pub(expiration), Pub(count)) then return true end
+            if name and fn(name, Pub(dtype), Pub(source), Pub(expiration), Pub(count), nil) then return true end
         end
     end
     return true
@@ -210,6 +212,7 @@ local ID = {
     CONSECRATION = 26573, HOLY_SHIELD = 20925, EXORCISM = 879, HOW = 24275,
     BOM = 19740, BOW = 19742, BOK = 20217, BOSANC = 20911,
     DEVOTION = 465, RET_AURA = 7294, RIGHTEOUS_FURY = 25780, HOLY_SHOCK = 20473,
+    HOLY_STRIKE = 679, SEAL_FURY = 1311649, HOLY_WRATH = 2812, TURN_UNDEAD = 2878,
     -- Cacador
     SERPENT = 1978, MARK = 1130, ARCANE_SHOT = 3044, MULTI = 2643, AIMED = 19434,
     RAPTOR = 2973, MONGOOSE = 1495, WING_CLIP = 2974, FEIGN = 5384, DETERRENCE = 19263,
@@ -237,6 +240,179 @@ local ID = {
     TIGERS_FURY = 5217, FAERIE_FIRE = 770, FAERIE_FIRE_FERAL = 16857, NS_DRUID = 17116,
 }
 
+-- IDs alternativos (todos os ranks do treinador do Forever) para achar a habilidade mesmo se o ID principal
+-- nao existir no cliente. Gerado a partir dos dados do WhatsTraining (Camelot) e do ForeverAuras.
+local ALT = {
+    ABOLISH_POISON = {2893},
+    AIMED = {19434, 20900, 20901, 20902, 20903, 20904},
+    ARCANE_EXPLOSION = {1449, 8437, 8438, 8439, 10201, 10202},
+    ARCANE_INTELLECT = {1459, 1460, 1461, 10156, 10157},
+    ARCANE_MISSILES = {5143, 5144, 5145, 8416, 8417, 10211, 10212},
+    ARCANE_SHOT = {3044, 14281, 14282, 14283, 14284, 14285, 14286, 14287},
+    BARKSKIN = {22812},
+    BASH = {5211, 6798, 8983},
+    BATTLE_SHOUT = {6673, 5242, 6192, 11549, 11550, 11551},
+    BITE = {22568, 22827, 22828, 22829},
+    BLIZZARD = {10, 6141, 8427, 10185, 10186, 10187},
+    BLOODTHIRST = {23892, 23893, 23894},
+    BOK = {20217},
+    BOM = {19740, 19834, 19835, 19836, 19837, 19838},
+    BOP = {1022, 5599, 10278},
+    BOW = {19742, 19850, 19852, 19853, 19854},
+    CHAIN_HEAL = {1064, 10622, 10623},
+    CHAIN_LIGHTNING = {421, 930, 2860, 10605},
+    CLAW = {3029, 5201, 9849, 9850},
+    CLEANSE = {4987},
+    CLEAVE = {845, 7369, 11608, 11609, 20569},
+    COA = {980, 1014, 6217, 11711, 11712, 11713},
+    CONCUSSIVE = {5116},
+    CONE_OF_COLD = {120, 8492, 10159, 10160, 10161},
+    CONSECRATION = {26573, 20116, 20922, 20923, 20924},
+    COR = {704, 7658, 7659, 11717},
+    CORRUPTION = {172, 6222, 6223, 7648, 11671, 11672},
+    COT = {1714, 11719},
+    COUNTERSPELL = {2139},
+    COW = {702, 1108, 6205, 7646, 11707, 11708},
+    CURE_DISEASE_P = {528},
+    CURE_DISEASE_S = {2870},
+    CURE_POISON_S = {526},
+    DEATH_COIL = {6789, 17925, 17926},
+    DEMON_ARMOR = {706, 1086, 11733, 11734, 11735},
+    DEMON_SKIN = {696},
+    DEMO_ROAR = {99, 1735, 9490, 9747, 9898},
+    DEMO_SHOUT = {1160, 6190, 11554, 11555, 11556},
+    DESPERATE_PRAYER = {19236, 19238, 19240, 19241, 19242, 19243},
+    DEVOTION = {465, 10290, 643, 10291, 1032, 10292, 10293},
+    DIRE_BEAR = {9634},
+    DISENGAGE = {781, 14272, 14273},
+    DISPEL_MAGIC = {527, 988},
+    DIVINE_PROT = {498, 5573},
+    DIVINE_SHIELD = {642, 1020},
+    DRAIN_LIFE = {689, 699, 709, 7651, 11699, 11700},
+    DRAIN_SOUL = {1120, 8288, 8289, 11675},
+    EARTH_SHOCK = {8042, 8044, 8045, 8046, 10412, 10413, 10414},
+    EVASION = {5277},
+    EVISCERATE = {6760, 6761, 6762, 8623, 8624, 11299, 11300},
+    EVOCATION = {12051},
+    EXECUTE = {5308, 20658, 20660, 20661, 20662},
+    EXORCISM = {879, 5614, 5615, 10312, 10313, 10314},
+    FADE = {586, 9578, 9579, 9592, 10941, 10942},
+    FAERIE_FIRE = {770, 778, 9749, 9907},
+    FIREBALL = {143, 145, 3140, 8400, 8401, 8402, 10148, 10149, 10150, 10151},
+    FIRE_BLAST = {2136, 2137, 2138, 8412, 8413, 10197, 10199},
+    FLAMETONGUE = {8024, 8027, 8030, 16339, 16341, 16342},
+    FLAME_SHOCK = {8050, 8052, 8053, 10447, 10448},
+    FLASH_HEAL = {2061, 9472, 9473, 9474, 10915, 10916, 10917},
+    FOL = {19750, 19939, 19940, 19941, 19942, 19943},
+    FRENZIED = {22842},
+    FROSTBOLT = {116, 205, 837, 7322, 8406, 8407, 8408, 10179, 10180, 10181},
+    FROST_ARMOR = {7300, 7301},
+    FROST_NOVA = {122, 865, 6131, 10230},
+    FROST_SHOCK = {8056, 8058, 10472, 10473},
+    GOUGE = {1776, 1777, 8629, 11285, 11286},
+    GREATER_HEAL = {2060, 10963, 10964, 10965},
+    GROUNDING = {8177},
+    HAWK = {13165, 14318, 14319, 14320, 14321, 14322},
+    HEAL = {2054, 2055, 6063, 6064},
+    HEALING_TOUCH = {5186, 5187, 5188, 5189, 6778, 8903, 9758, 9888, 9889},
+    HEALING_WAVE = {332, 547, 913, 939, 959, 8005, 10395, 10396},
+    HELLFIRE = {1949, 11683, 11684},
+    HEROIC_STRIKE = {284, 285, 1608, 11564, 11565, 11566, 11567},
+    HOJ = {853, 5588, 5589, 10308},
+    HOLY_FIRE = {14914, 15262, 15263, 15264, 15265, 15266, 15267, 15261},
+    HOLY_LIGHT = {639, 647, 1026, 1042, 3472, 10328, 10329},
+    HOLY_SHIELD = {20927, 20928},
+    HOLY_SHOCK = {20473, 20929, 20930},
+    HOLY_STRIKE = {679, 678, 1866, 680, 2495, 5569, 10332, 10333},
+    HOLY_WRATH = {2812, 10318},
+    HOW = {24275, 24274, 24239},
+    HOWL = {5484, 17928},
+    HURRICANE = {16914, 17401, 17402},
+    ICE_ARMOR = {7302, 7320, 10219, 10220},
+    ICE_BARRIER = {13031, 13032, 13033},
+    IMMOLATE = {348, 707, 1094, 2941, 11665, 11667, 11668},
+    INNER_FIRE = {588, 7128, 602, 1006, 10951, 10952},
+    INSECT_SWARM = {24974, 24975, 24976, 24977},
+    INTIM_SHOUT = {5246},
+    JUDGEMENT = {20271},
+    KICK = {1766, 1767, 1768, 1769},
+    KIDNEY = {408, 8643},
+    LESSER_HEAL = {2052, 2053},
+    LHW = {8004, 8008, 8010, 10466, 10467, 10468},
+    LIFE_TAP = {1454, 1455, 1456, 11687, 11688, 11689},
+    LIGHTNING_BOLT = {529, 548, 915, 943, 6041, 10391, 10392, 15207, 15208},
+    LIGHTNING_SHIELD = {324, 325, 905, 945, 8134, 10431, 10432},
+    LOH = {633, 2800, 10310},
+    MAGE_ARMOR = {6117, 22782, 22783},
+    MAGMA = {8190, 10585, 10586, 10587},
+    MANA_SHIELD = {1463, 8494, 8495, 10191, 10192, 10193},
+    MARK = {1130, 14323, 14324, 14325},
+    MAUL = {6808, 6809, 8972, 9745, 9880, 9881},
+    MEND_PET = {136, 3111, 3661, 3662, 13542, 13543, 13544},
+    MIND_BLAST = {8092, 8102, 8103, 8104, 8105, 8106, 10945, 10946, 10947},
+    MIND_FLAY = {17311, 17312, 17313, 17314, 18807},
+    MONGOOSE = {1495, 14269, 14270, 14271},
+    MOONFIRE = {8921, 8924, 8925, 8926, 8927, 8928, 8929, 9833, 9834, 9835},
+    MORTAL_STRIKE = {21551, 21552, 21553},
+    MOTW = {1126, 5232, 6756, 5234, 8907, 9884, 9885},
+    MULTI = {2643},
+    OVERPOWER = {7384, 7887, 11584, 11585},
+    PSYCHIC_SCREAM = {8122, 8124, 10888, 10890},
+    PUMMEL = {6552, 6554},
+    PURGE = {370, 8012},
+    PURIFY = {1152},
+    PW_FORT = {1243, 1244, 1245, 2791, 10937, 10938},
+    PW_SHIELD = {17, 592, 600, 3747, 6065, 6066, 10898, 10899, 10900, 10901},
+    PYROBLAST = {12505, 12522, 12523, 12524, 12525, 12526, 18809},
+    RAIN_OF_FIRE = {5740, 6219, 11677, 11678},
+    RAKE = {1822, 1823, 1824, 9904},
+    RAPID_FIRE = {3045},
+    RAPTOR = {14260, 14261, 14262, 14263, 14264, 14265, 14266},
+    REGROWTH = {8936, 8938, 8939, 8940, 8941, 9750, 9856, 9857, 9858},
+    REJUV = {774, 1058, 1430, 2090, 2091, 3627, 8910, 9839, 9840, 9841},
+    REMOVE_CURSE = {2782},
+    REMOVE_LESSER_CURSE = {475},
+    REND = {772, 6546, 6547, 6548, 11572, 11573, 11574},
+    RENEW = {139, 6074, 6075, 6076, 6077, 6078, 10927, 10928, 10929},
+    RET_AURA = {7294, 10298, 10299, 10300, 10301},
+    REVENGE = {6572, 6574, 7379, 11600, 11601},
+    RIGHTEOUS_FURY = {25780},
+    RIP = {9492, 9493, 9752, 9894, 9896},
+    ROCKBITER = {8017, 8018, 8019, 10399, 16314, 16315, 16316},
+    SCORCH = {2948, 8444, 8445, 8446, 10205, 10206, 10207},
+    SEAL_FURY = {1311649, 1311656, 20163, 20419, 20421, 20422, 20423},
+    SEARING = {6363, 6364, 6365, 10437, 10438},
+    SERPENT = {1978, 13549, 13550, 13551, 13552, 13553, 13554, 13555},
+    SHADOWBURN = {18867, 18868, 18869, 18870, 18871},
+    SHADOW_BOLT = {695, 705, 1088, 1106, 7641, 11659, 11660, 11661},
+    SHIELD_BASH = {72, 1671, 1672},
+    SHIELD_BLOCK = {2565},
+    SHIELD_SLAM = {23923, 23924, 23925},
+    SHIELD_WALL = {871},
+    SHRED = {5221, 6800, 8992, 9829, 9830},
+    SINISTER = {1757, 1758, 1759, 1760, 8621, 11293, 11294},
+    SMITE = {591, 598, 984, 1004, 6060, 10933, 10934},
+    SND = {5171, 6774},
+    SOC = {20915, 20918, 20919, 20920},
+    SOL = {20165, 20347, 20348, 20349},
+    SOR = {20287, 20288, 20289, 20290, 20291, 20292, 20293},
+    SOTC = {21082, 20162, 20305, 20306, 20307, 20308},
+    SOW = {20166, 20356, 20357},
+    STARFIRE = {2912, 8949, 8950, 8951, 9875, 9876},
+    SUNDER = {7405, 8380, 11596, 11597},
+    SWIPE = {779, 780, 769, 9754, 9908},
+    SWP = {589, 594, 970, 992, 2767, 10892, 10893, 10894},
+    THORNS = {467, 782, 1075, 8914, 9756, 9910},
+    THUNDER_CLAP = {6343, 8198, 8204, 8205, 11580, 11581},
+    TURN_UNDEAD = {2878, 5627, 10326},
+    VANISH = {1856, 1857},
+    VOLLEY = {1510, 14294, 14295},
+    WHIRLWIND = {1680},
+    WINDFURY = {8232, 8235, 10486, 16362},
+    WING_CLIP = {2974, 14267, 14268},
+    WRATH = {5177, 5178, 5179, 5180, 6780, 8905, 9912},
+}
+
 local N, ICON = {}, {}   -- N[key] = nome localizado, ICON[key] = textura
 local known = {}         -- known[nomeLocalizado] = true
 local RANKID = {}        -- RANKID[key] = Spell ID do rank que o jogador aprendeu
@@ -254,9 +430,24 @@ local function ResolveRankIDs()
     end
 end
 
+-- Habilidades que estao nas SUAS barras (por nome localizado). So faz sentido
+-- sugerir o que voce consegue apertar; com as barras vazias o filtro e ignorado.
+local barNames, barCount = {}, 0
+local function OnBar(name)
+    return not DB or not DB.barOnly or barCount == 0 or barNames[name] == true
+end
+
+-- Resolve o nome localizado de cada habilidade pelo ID principal e, se o cliente
+-- nao o conhecer, pelos IDs alternativos (ranks do treinador do Forever).
 local function ResolveNames()
     for key, id in pairs(ID) do
         local name, icon = SpellInfo(id)
+        if not name and ALT[key] then
+            for _, alt in ipairs(ALT[key]) do
+                name, icon = SpellInfo(alt)
+                if name then break end
+            end
+        end
         if name then N[key], ICON[key] = name, icon end
     end
 end
@@ -303,6 +494,7 @@ local REACTIVE = { EXECUTE = true, OVERPOWER = true, REVENGE = true, RIPOSTE = t
 local function Ready(key, unit)
     local name = N[key]
     if not name or not known[name] then return false end
+    if not OnBar(name) then return false end
     local usable = SpellUsable(name)
     if usable == false then return false end
     if usable == nil and REACTIVE[key] then return false end
@@ -319,6 +511,7 @@ end
 local function OffCooldown(key)
     local name = N[key]
     if not name or not known[name] then return false end
+    if not OnBar(name) then return false end
     local start, duration, active, onGCD = SpellCooldown(name)
     if active == true and onGCD ~= true then return false end
     if start > 0 and duration > 1.6 and (start + duration - GetTime()) > 0.25 then return false end
@@ -394,12 +587,17 @@ end
 
 local function RebuildKeyCache()
     wipe(keyCache)
+    wipe(barNames)
+    barCount = 0
     for slot = 1, 120 do
         if Is(HasAction(slot)) then
             local name = SlotSpellName(slot)
-            if name and not keyCache[name] then
-                local key = KeyForSlot(slot)
-                if key then keyCache[name] = key end
+            if name then
+                if not barNames[name] then barNames[name] = true; barCount = barCount + 1 end
+                if not keyCache[name] then
+                    local key = KeyForSlot(slot)
+                    if key then keyCache[name] = key end
+                end
             end
         end
     end
@@ -426,15 +624,37 @@ local lastGroupScan = 0
 -- Auras secretas: quando o jogo esconde as auras, "buff ausente" nao pode ser
 -- concluido. auraSecret[unit] = true faz as regras de "falta X" ficarem mudas.
 local auraSecret = {}
+local auraDur = {}                   -- [nome] = duracao total observada (ex.: duracao real do selo)
+
+-- CONTEXTO DO PERSONAGEM (equipamento) e do ALVO, lidos fora de combate, quando os
+-- valores ainda sao legiveis, e guardados. Em combate o jogo os esconde.
+local gear = { shield = false, twoHand = false, speed = 2.0 }
+local tcache = {}                    -- tipo/classificacao do alvo atual (limpo ao trocar de alvo)
+
+local function RefreshGear()
+    local function equipLoc(slot)
+        local id = GetInventoryItemID("player", slot)
+        if type(id) ~= "number" then return nil end
+        local f = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+        if not f then return nil end
+        local ok, _, _, _, loc = pcall(f, id)
+        return ok and loc or nil
+    end
+    gear.twoHand = equipLoc(16) == "INVTYPE_2HWEAPON"
+    gear.shield = equipLoc(17) == "INVTYPE_SHIELD"
+    local sp = UnitAttackSpeed and Pub((UnitAttackSpeed("player")))
+    if type(sp) == "number" and sp > 0 then gear.speed = sp end
+end
 
 local function CollectAuras(unit, filter, store, mineOnly, tag)
     wipe(store)
     if not UnitExists(unit) then return end
     local now = GetTime()
-    local readable = ForEachAura(unit, filter, function(name, _, source, expiration)
+    local readable = ForEachAura(unit, filter, function(name, _, source, expiration, _, duration)
         if not mineOnly or source == "player" or source == "pet" then
             local remain = (expiration and expiration > 0) and (expiration - now) or 999
             if not store[name] or store[name] < remain then store[name] = remain end
+            if duration and duration > 0 then auraDur[name] = duration end
         end
     end)
     if tag then auraSecret[tag] = not readable end
@@ -533,7 +753,31 @@ local function CountEnemies()
 end
 
 local CREATURE_UNDEAD = { ["Undead"] = true, ["Morto-vivo"] = true, ["Morta-viva"] = true }
-local CREATURE_DEMON  = { ["Demon"] = true, ["Demônio"] = true }
+local CREATURE_DEMON  = { ["Demon"] = true, ["Demônio"] = true, ["Demonio"] = true }
+local CREATURE_HUMANOID = { ["Humanoid"] = true, ["Humanoide"] = true }
+
+-- SELO ATIVO. Fora de combate vem das auras (exato). Em combate o jogo esconde as
+-- auras, entao vale o estado rastreado: o selo que VOCE lancou + a duracao real
+-- observada (sealDur). No Forever o Julgamento nao consome mais o selo.
+local SEAL_KEYS = { "SEAL_FURY", "SOC", "SOR", "SOTC", "SOJ", "SOL", "SOW" }
+local sealState = { key = nil, expires = 0 }
+local sealDur = 30
+
+local function UpdateSealFromAuras()
+    if auraSecret.player then return end
+    local now, found = GetTime(), nil
+    for _, k in ipairs(SEAL_KEYS) do
+        local n = N[k]
+        if n and playerBuffs[n] then
+            found = k
+            sealState.expires = now + playerBuffs[n]
+            if auraDur[n] then sealDur = auraDur[n] end
+            break
+        end
+    end
+    sealState.key = found
+    if not found then sealState.expires = 0 end
+end
 
 local function BuildContext()
     c.now = GetTime()
@@ -558,12 +802,21 @@ local function BuildContext()
     if c.hostileSecret then c.hostile = c.inCombat and not UnitIsDead("target")
     else c.hostile = c.target and atk and not UnitIsDead("target") end
     c.thp = c.target and UnitPct("target") or 100
-    local class = c.target and Pub(UnitClassification("target")) or "normal"
-    c.elite = class == "elite" or class == "worldboss" or class == "rareelite"
-              or (c.target and Pub(UnitLevel("target")) == -1)
+    -- tipo/classificacao do alvo: lidos quando legiveis (ao selecionar o alvo, fora de
+    -- combate) e guardados em tcache; em combate o jogo os esconde.
+    if c.target then
+        local cls = Pub(UnitClassification("target"))
+        if cls then tcache.elite = (cls == "elite" or cls == "worldboss" or cls == "rareelite") end
+        if Pub(UnitLevel("target")) == -1 then tcache.elite = true end
+        local ct = Pub(UnitCreatureType("target"))
+        if ct then tcache.ctype = ct end
+    end
+    c.elite = c.target and tcache.elite or false
     c.melee = c.hostile and Near("target")
-    local ctype = c.target and Pub(UnitCreatureType("target"))
+    local ctype = c.target and tcache.ctype or nil
+    c.ctype = ctype
     c.undeadOrDemon = ctype and (CREATURE_UNDEAD[ctype] or CREATURE_DEMON[ctype]) or false
+    c.humanoid = ctype and CREATURE_HUMANOID[ctype] or false
     c.threat = (c.hostile and UnitThreatSituation and Pub(UnitThreatSituation("player", "target"))) or 0
     c.targetOnAlly = c.hostile and UnitExists("targettarget") and not UnitIsUnit("targettarget", "player")
                      and UnitInMyGroup("targettarget")
@@ -572,6 +825,7 @@ local function BuildContext()
     CollectAuras("player", "HARMFUL", playerDebuffs)
     CollectAuras("target", "HARMFUL", targetMine, true, "target")
     CollectAuras("target", "HARMFUL", targetAny)
+    UpdateSealFromAuras()
 
     c.castData = c.castData or {}
     -- isolados com pcall: se o jogo bloquear um deles, o resto (procs) segue funcionando
@@ -607,7 +861,7 @@ local function Debuff(key) return N[key] and playerDebuffs[N[key]] end
 local function OnTarget(key) return N[key] and targetMine[N[key]] end         -- debuff MEU no alvo
 local function OnTargetAny(key) return N[key] and targetAny[N[key]] end       -- debuff de qualquer um
 local function Lacks(key)
-    if not N[key] then return false end
+    if not N[key] then return true end   -- feitico inexistente neste cliente: nao pode estar ativo
     if auraSecret.player then return PlayerAuraByID(RANKID[key] or ID[key]) == false end
     return not playerBuffs[N[key]]
 end
@@ -661,9 +915,13 @@ end
 -- A primeira regra (na ordem) cuja condicao for verdadeira E cuja habilidade
 -- estiver aprendida e pronta e exibida.
 
+-- pick pode ser: "CHAVE", { "CHAVE1", "CHAVE2" } ou uma funcao(c) que devolve a lista
+-- (escolha dinamica, ex.: qual selo usar conforme o alvo e a arma).
 local function R(cat, pick, when, msg, unit)
-    if type(pick) == "string" then pick = { pick } end
-    return { cat = cat, pick = pick, when = when, msg = msg, unit = unit }
+    local pickFn
+    if type(pick) == "string" then pick = { pick }
+    elseif type(pick) == "function" then pickFn, pick = pick, {} end
+    return { cat = cat, pick = pick, pickFn = pickFn, when = when, msg = msg, unit = unit }
 end
 
 local function UnitLabel(unit)
@@ -843,9 +1101,65 @@ CLASS_RULES.PRIEST = function()
     }
 end
 
+-- Nomes aceitos em /mvat selo <nome>
+local SEAL_PREF = {
+    auto = "auto",
+    fury = "SEAL_FURY", furia = "SEAL_FURY",
+    righteousness = "SOR", retidao = "SOR",
+    crusader = "SOTC", cruzado = "SOTC",
+    command = "SOC", comando = "SOC",
+    light = "SOL", luz = "SOL",
+    wisdom = "SOW", sabedoria = "SOW",
+    justice = "SOJ", justica = "SOJ",
+}
+local paladin = {}   -- exposto para /mvat debug
+
+-- PALADINO (regras do WoW Forever, segundo as notas de mudancas dos proprios addons):
+--  * Selo da Furia e "o selo de tanque": cada golpe soma dano Sagrado e, com escudo, um absorvedor.
+--  * O Julgamento NAO consome mais o selo (recarga 10s, alcance 10m); julgar a Furia provoca o alvo.
+--  * Golpe Sagrado: golpe base do Ret, recarga 10s (arma + dano Sagrado).
 CLASS_RULES.PALADIN = function()
-    local SEALS = { "SOC", "SOR", "SOTC", "SOL", "SOW", "SOJ" }
-    local function hasSeal() for _, k in ipairs(SEALS) do if Buff(k) then return true end end end
+    local function tankMode() return gear.shield or Buff("RIGHTEOUS_FURY") end
+
+    -- segundos restantes do selo (auras fora de combate; rastreio por casts em combate)
+    local function sealLeft()
+        if not sealState.key then return nil end
+        local left = sealState.expires - GetTime()
+        return left > 0 and left or nil
+    end
+
+    local function ok(k) return Known(k) and OnBar(N[k]) end
+
+    -- Escolhe o melhor selo ENTRE OS QUE VOCE TEM e estao na sua barra.
+    local function chooseSeal(c)
+        local pref = DB.seal and DB.seal ~= "auto" and SEAL_PREF[DB.seal]
+        if pref and pref ~= "auto" and ok(pref) then
+            return pref, "fixado por voce (/mvat selo auto desfaz)"
+        end
+        if ok("SEAL_FURY") and tankMode() then
+            return "SEAL_FURY", gear.shield and "escudo equipado: o selo de tanque (dano + absorcao)"
+                or "Furia Justa ativa: o selo de tanque"
+        end
+        -- Selo da Justica (impede a fuga) nao e escolhido sozinho: metade dos mobs sao
+        -- humanoides e custaria dano. Use /mvat selo justica quando um alvo ficar fugindo.
+        if ok("SOW") and c.manaPct < 35 then
+            return "SOW", "mana baixa: Sabedoria devolve mana"
+        end
+        if ok("SOC") and (gear.twoHand or gear.speed >= 2.6) then
+            return "SOC", "arma lenta/duas maos: o Comando bate mais forte"
+        end
+        if ok("SOR") then
+            return "SOR", string.format("dano confiavel para a sua arma (%.1fs)", gear.speed)
+        end
+        if ok("SOC") then return "SOC", "melhor selo de dano disponivel" end
+        for _, k in ipairs({ "SOTC", "SEAL_FURY", "SOL", "SOW", "SOJ" }) do
+            if ok(k) then return k, "unico selo disponivel na sua barra" end
+        end
+    end
+    paladin.choose, paladin.tankMode, paladin.sealLeft = chooseSeal, tankMode, sealLeft
+
+    local function sealPicks(c) return c.sealPick and { c.sealPick } or {} end
+
     return {
         Emergency("DIVINE_SHIELD", 20, nil, "Quase morto: Escudo Divino"),
         Emergency("LOH", 12, nil, "Ultimo recurso: Imposicao das Maos"),
@@ -858,15 +1172,46 @@ CLASS_RULES.PALADIN = function()
         HealLowest("HOLY_SHOCK", 50),
         HealLowest("HOLY_LIGHT", 45),
         HealLowest("FOL", 75),
-        R("COMBO", { "SOC", "SOR" }, function(c) return (c.hostile or c.inCombat) and not auraSecret.player and not hasSeal() end,
-            "Sem selo: ative o Selo (depois Julgamento)", "player"),
-        Hit("COMBO", "JUDGEMENT", function() return hasSeal() end, "COMBO Selo ativo -> Julgamento (e reaplique o selo)"),
+        -- 1) sem selo (ou acabando): aplica o melhor selo para o contexto
+        R("COMBO", sealPicks, function(c)
+            if not (c.hostile or c.inCombat) then return false end
+            local k, why = chooseSeal(c)
+            c.sealPick, c.sealWhy = k, why
+            if not k then return false end
+            local left = sealLeft()
+            return left == nil or (left < 3 and c.inCombat)
+        end, function(c)
+            local nm = N[c.sealPick] or ""
+            if sealLeft() then return "Renove o selo (" .. nm .. "): " .. c.sealWhy end
+            return "Sem selo - " .. nm .. ": " .. c.sealWhy
+        end, "player"),
+        -- 2) antes da luta, com outro selo ativo: sugere trocar se o contexto pede outro
+        R("COMBO", sealPicks, function(c)
+            if c.inCombat or not c.hostile then return false end
+            local k, why = chooseSeal(c)
+            c.sealPick, c.sealWhy = k, why
+            return k ~= nil and sealState.key ~= nil and sealState.key ~= k
+        end, function(c) return "Troque para " .. (N[c.sealPick] or "") .. ": " .. c.sealWhy end, "player"),
+        -- 3) Julgamento (nao gasta o selo no Forever) e Golpe Sagrado, ambos com recarga de 10s
+        Hit("COMBO", "JUDGEMENT", function() return sealLeft() ~= nil end, function()
+            return "Julgamento: nao gasta o selo (recarga 10s)" .. (sealState.key == "SEAL_FURY" and " - provoca o alvo" or "")
+        end),
+        Hit("ROTATION", "HOLY_STRIKE", nil, "Golpe Sagrado (recarga 10s): arma + dano Sagrado"),
         Hit("COMBO", "HOW", nil, "Alvo < 20%: Martelo da Colera"),
-        R("AOE", "CONSECRATION", function(c) return c.meleeAoe and c.manaPct > 30 end, "Varios mobs: Consagracao"),
-        R("ROTATION", "HOLY_SHIELD", function(c) return c.inCombat and Buff("RIGHTEOUS_FURY") and Lacks("HOLY_SHIELD") end, "Tank: Escudo Sagrado"),
+        R("AOE", "CONSECRATION", function(c)
+            return (c.meleeAoe or (tankMode() and c.enemies >= 2)) and c.manaPct > 30
+        end, "Varios mobs: Consagracao"),
+        R("ROTATION", "HOLY_SHIELD", function(c) return c.inCombat and tankMode() and Lacks("HOLY_SHIELD") end, "Tanque: Escudo Sagrado"),
         Hit("ROTATION", "EXORCISM", function(c) return c.undeadOrDemon end, "Morto-vivo/Demonio: Exorcismo"),
-        SelfBuff({ "DEVOTION", "RET_AURA" }, { "DEVOTION", "RET_AURA" }, true),
-        SelfBuff({ "BOM", "BOW", "BOK" }, { "BOM", "BOW", "BOK", "BOSANC" }),
+        Hit("ROTATION", "HOLY_WRATH", function(c) return c.undeadOrDemon and c.enemies >= 2 end, "Varios mortos-vivos/demonios: Colera Sagrada"),
+        R("BUFF", "RIGHTEOUS_FURY", function(c) return not c.inCombat and gear.shield and Lacks("RIGHTEOUS_FURY") end,
+            "Escudo equipado: ative Furia Justa (ameaca de tanque)", "player"),
+        R("BUFF", function() return tankMode() and { "DEVOTION", "RET_AURA" } or { "RET_AURA", "DEVOTION" } end,
+            function(c) return not c.inCombat and Lacks("DEVOTION") and Lacks("RET_AURA") end,
+            function() return tankMode() and "Aura ausente: Devocao (tanque)" or "Aura ausente: Retribuicao (dano)" end, "player"),
+        R("BUFF", { "BOK", "BOM", "BOW" }, function(c)
+            return not c.inCombat and Lacks("BOK") and Lacks("BOM") and Lacks("BOW")
+        end, "Bencao ausente", "player"),
     }
 end
 
@@ -1067,7 +1412,8 @@ local SEQUENCES = {
         { "PW_SHIELD", "RENEW", 6, "Escudo usado: Renovar" },
     },
     PALADIN = {
-        { { "SOC", "SOR", "SOTC", "SOL", "SOW", "SOJ" }, "JUDGEMENT", 28, "Selo usado: Julgamento!", "target" },
+        { { "SEAL_FURY", "SOC", "SOR", "SOTC", "SOL", "SOW", "SOJ" }, "JUDGEMENT", 28, "Selo ativo: Julgamento (nao gasta o selo)", "target" },
+        { "JUDGEMENT", "HOLY_STRIKE", 4, "Julgamento feito: Golpe Sagrado", "target" },
     },
     HUNTER = {
         { "MARK", "SERPENT", 8, "Marca usada: Picada da Serpente", "target" },
@@ -1113,7 +1459,13 @@ local function OnPlayerCast(sid)
         end
     end
     local key = nameToKey[name]
-    if key then lastCast.key, lastCast.t = key, GetTime() end
+    if key then
+        lastCast.key, lastCast.t = key, GetTime()
+        -- selo lancado por voce: rastreia qual e ate quando (o jogo esconde as auras em combate)
+        for _, sk in ipairs(SEAL_KEYS) do
+            if key == sk then sealState.key, sealState.expires = key, GetTime() + sealDur end
+        end
+    end
 end
 
 local function LoadClassRules()
@@ -1150,7 +1502,8 @@ local function Evaluate()
             local unit = ResolveUnit(rule)
             if (unit == nil and not rule.unit) or (unit and UnitExists(unit)) then
                 if not rule.when or rule.when(c, unit) then
-                    for _, key in ipairs(rule.pick) do
+                    local picks = rule.pickFn and rule.pickFn(c, unit) or rule.pick
+                    for _, key in ipairs(picks) do
                         if Known(key) and Ready(key, unit) then return rule, key, unit end
                     end
                 end
@@ -1566,10 +1919,11 @@ core:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     elseif event == "PLAYER_LOGIN" then
         ApplyLayout()
         RefreshSpells()
+        pcall(RefreshGear)
         LoadClassRules()
         for _, e in ipairs({ "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP", "CHARACTER_POINTS_CHANGED",
                              "ACTIONBAR_SLOT_CHANGED", "UPDATE_BINDINGS", "UPDATE_SHAPESHIFT_FORM",
-                             "UPDATE_BONUS_ACTIONBAR", "PLAYER_TARGET_CHANGED" }) do
+                             "UPDATE_BONUS_ACTIONBAR", "PLAYER_TARGET_CHANGED", "PLAYER_EQUIPMENT_CHANGED" }) do
             if not C_EventUtils or not C_EventUtils.IsEventValid or C_EventUtils.IsEventValid(e) then
                 core:RegisterEvent(e)
             end
@@ -1621,7 +1975,11 @@ core:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         if not ok then lastError = err end
     elseif event == "ENCOUNTER_TIMELINE_EVENT_ADDED" then
         encState.timeline = encState.timeline + 1
+    elseif event == "PLAYER_EQUIPMENT_CHANGED" then
+        pcall(RefreshGear)
+        elapsed = UPDATE_INTERVAL
     elseif event == "PLAYER_TARGET_CHANGED" or event:find("^UNIT_SPELLCAST_") then
+        if event == "PLAYER_TARGET_CHANGED" then wipe(tcache) end -- tipo/classe do alvo anterior nao vale mais
         elapsed = UPDATE_INTERVAL -- reavalia imediatamente
     end
 end)
@@ -1663,11 +2021,39 @@ local function Slash(input)
             testUntil = GetTime() + 5
             ShowSuggestion(key, "COMBO", "Teste do HUD (5s)\n|cffaaaaaa" .. N[key] .. "|r")
         else Msg("Nenhuma habilidade conhecida encontrada.") end
+    elseif cmd == "selo" or cmd == "seal" then
+        if playerClass ~= "PALADIN" then Msg("O comando de selo e so do Paladino."); return end
+        local want = SEAL_PREF[arg]
+        if arg == "" then
+            Msg("Selo: " .. tostring(DB.seal) .. ". Use /mvat selo auto | retidao | furia | cruzado | comando | luz | sabedoria | justica")
+        elseif not want then
+            Msg("Nao conheco o selo '" .. arg .. "'. Use: auto, retidao, furia, cruzado, comando, luz, sabedoria, justica")
+        else
+            DB.seal = (want == "auto") and "auto" or arg
+            Msg(want == "auto" and "Selo AUTOMATICO: o addon escolhe pelo alvo, arma e escudo."
+                or ("Selo fixado em " .. (N[want] or arg) .. "."))
+        end
+    elseif cmd == "barra" or cmd == "bar" then
+        DB.barOnly = not DB.barOnly
+        Msg(DB.barOnly and ("So sugere habilidades que estao nas suas barras (" .. barCount .. " encontradas).")
+            or "Sugere qualquer habilidade que voce ja aprendeu, mesmo fora das barras.")
     elseif cmd == "debug" then
         local count = 0
         for _, rule in ipairs(rules) do for _, k in ipairs(rule.pick) do if Known(k) then count = count + 1 end end end
         Msg(string.format("Classe %s | %d regras | %d habilidades aprendidas usadas | inimigos %s",
             tostring(playerClass), #rules, count, tostring(c.enemies)))
+        Msg(string.format("Barras: %d habilidades (filtro %s) | arma: %s, %.1fs | escudo: %s",
+            barCount, DB.barOnly and "LIGADO" or "desligado", gear.twoHand and "duas maos" or "uma mao", gear.speed,
+            gear.shield and "sim" or "nao"))
+        if playerClass == "PALADIN" and paladin.choose then
+            local have = {}
+            for _, k in ipairs(SEAL_KEYS) do if Known(k) then have[#have + 1] = (N[k] or k) .. (OnBar(N[k]) and "" or " (fora da barra)") end end
+            Msg("Selos que voce tem: " .. (#have > 0 and table.concat(have, ", ") or "nenhum"))
+            local k, why = paladin.choose(c)
+            Msg("Selo escolhido: " .. (k and ((N[k] or k) .. " - " .. why) or "nenhum disponivel") .. " | modo tanque: " .. tostring(paladin.tankMode() and true or false))
+            local left = paladin.sealLeft()
+            Msg("Selo ativo: " .. (sealState.key and (N[sealState.key] or sealState.key) or "nenhum") .. (left and string.format(" (%ds)", math.floor(left)) or ""))
+        end
     elseif cmd == "diag" then
         local function yn(v) return v and "|cffff5555SECRETO|r" or "|cff55ff55liberado|r" end
         local function should(fn)
@@ -1708,7 +2094,7 @@ local function Slash(input)
         Msg("Ultimo erro capturado: " .. (lastError and tostring(lastError) or "nenhum"))
         lastError = nil -- o proximo diag mostra so erros novos
     else
-        Msg("Comandos: lock | unlock | scale <0.5-3> | aoe <n> | combat | text | test | reset | on | off | debug | diag")
+        Msg("Comandos: lock | unlock | scale <0.5-3> | aoe <n> | combat | text | barra | selo | test | reset | on | off | debug | diag")
     end
 end
 

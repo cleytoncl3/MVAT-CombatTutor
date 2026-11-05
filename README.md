@@ -62,6 +62,8 @@ mobs estão em combate e ativar as sugestões de área/farm.
 | `/mvat aoe 3` | Quantos inimigos ativam o modo área/farm (2 a 10) |
 | `/mvat combat` | Liga/desliga "mostrar só em combate" |
 | `/mvat text` | Liga/desliga o texto explicativo abaixo do ícone |
+| `/mvat barra` | Liga/desliga "só sugerir habilidades que estão nas suas barras" (padrão: ligado) |
+| `/mvat selo <nome>` | Paladino: fixa um selo (`retidao`, `furia`, `cruzado`, `comando`, `luz`, `sabedoria`, `justica`) ou volta ao `auto` |
 | `/mvat test` | Mostra um ícone de teste por 5 segundos |
 | `/mvat reset` | Restaura posição e opções padrão |
 | `/mvat on` / `/mvat off` | Ativa / desativa o addon |
@@ -92,6 +94,29 @@ O Forever usa o motor moderno do WoW, que esconde de addons várias informaçõe
 
 Por isso, em combate, as sugestões podem ser bem menos frequentes que fora dele. Use `/mvat diag`
 depois de uma luta para ver o que o jogo liberou.
+
+### Só o que está na sua barra
+
+O MVAT lê as suas barras de ação (inclusive ElvUI/EllesmereUI, que usam os mesmos slots) e **só sugere
+habilidades que você consegue apertar**. Com as barras vazias o filtro é ignorado. `/mvat barra` liga e
+desliga. Habilidades de outros níveis só entram quando você as aprende (o livro de feitiços é relido).
+
+### Paladino (regras do Forever)
+
+O Forever tem um Paladino diferente do Classic Era, e o MVAT segue as notas de mudanças dos addons do próprio
+Forever (TalentsForeverBook / WhatsTraining):
+
+- **Selo escolhido pelo contexto**, entre os que você tem **e estão na barra**, com o motivo na tela:
+  escudo equipado ou Fúria Justa ativa → **Selo da Fúria** ("o selo de tanque": dano Sagrado + absorção);
+  arma lenta ou de duas mãos → **Comando** (a partir do nível 30); mana baixa → **Sabedoria**; caso
+  contrário **Retidão**. O Cruzado só aparece se for o único que sobrou; a Justiça só com `/mvat selo justica`.
+- **Antes da luta**, se o selo ativo não é o que o contexto pede, ele sugere trocar.
+- **Julgamento não gasta mais o selo** (recarga de 10 s, alcance de 10 m; julgar a Fúria provoca o alvo): o
+  MVAT não manda mais refazer o selo depois do Julgamento.
+- **Golpe Sagrado** (recarga de 10 s), Exorcismo em morto-vivo/demônio, Consagração com vários inimigos,
+  Fúria Justa quando há escudo, aura de Devoção (tanque) ou Retribuição (dano) e bênçãos.
+- O estado do selo é rastreado pelos seus próprios casts e pela duração real vista nas auras, porque em
+  combate o Forever esconde as auras.
 
 ### Painel de cast (o que o inimigo está castando)
 
