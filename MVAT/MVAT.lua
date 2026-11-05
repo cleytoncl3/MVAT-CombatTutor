@@ -41,64 +41,95 @@ local GROUP_SCAN_INTERVAL = 0.25
 -- 2. COMPATIBILIDADE DE API
 ---------------------------------------------------------------------------
 local C_Spell = C_Spell
-local GetTime, UnitExists, UnitIsDeadOrGhost = GetTime, UnitExists, UnitIsDeadOrGhost
+local GetTime = GetTime
+
+-- VALORES SECRETOS (WoW Forever / motor moderno): em combate a API pode devolver
+-- valores "secretos". Comparar, somar ou testar um deles gera erro de Lua, entao
+-- TODA leitura passa por Pub/Is: valor secreto vira nil/false ("desconhecido") e
+-- a regra que dependia dele simplesmente nao dispara.
+local issecret = type(issecretvalue) == "function" and issecretvalue or function() return false end
+local function Pub(v) if issecret(v) then return nil end return v end
+local function Is(v) if issecret(v) then return false end return v and true or false end
+local function PubAll(...)
+    for i = 1, select("#", ...) do if issecret((select(i, ...))) then return end end
+    return ...
+end
+
+local function UnitExists(u) return Is(_G.UnitExists(u)) end
+local function UnitIsDeadOrGhost(u) return Is(_G.UnitIsDeadOrGhost(u)) end
+local function UnitIsUnit(a, b) return Is(_G.UnitIsUnit(a, b)) end
+local function UnitCanAttack(a, b) return Is(_G.UnitCanAttack(a, b)) end
+local function UnitIsDead(u) return Is(_G.UnitIsDead(u)) end
+local function UnitAffectingCombat(u) return Is(_G.UnitAffectingCombat(u)) end
 
 -- Retorna nome localizado e icone a partir do Spell ID (funciona em ptBR e enUS)
 local function SpellInfo(id)
     if C_Spell and C_Spell.GetSpellInfo then
         local info = C_Spell.GetSpellInfo(id)
-        if info then return info.name, info.iconID end
+        if info then return Pub(info.name), Pub(info.iconID) end
         return nil
     end
     local name, _, icon = GetSpellInfo(id)
-    return name, icon
+    return Pub(name), Pub(icon)
 end
 
+-- Recarga desconhecida (secreta) e tratada como pronta: o jogo ainda impede o
+-- uso, e o addon prefere sugerir a ficar mudo.
 local function SpellCooldown(spell)
     if C_Spell and C_Spell.GetSpellCooldown then
         local cd = C_Spell.GetSpellCooldown(spell)
-        if cd then return cd.startTime or 0, cd.duration or 0 end
+        if cd then return Pub(cd.startTime) or 0, Pub(cd.duration) or 0 end
         return 0, 0
     end
     local start, duration = GetSpellCooldown(spell)
-    return start or 0, duration or 0
+    return Pub(start) or 0, Pub(duration) or 0
 end
 
+-- true = usavel, false = nao, nil = desconhecido
 local function SpellUsable(spell)
-    if C_Spell and C_Spell.IsSpellUsable then return C_Spell.IsSpellUsable(spell) end
-    return IsUsableSpell(spell)
+    local usable
+    if C_Spell and C_Spell.IsSpellUsable then usable = C_Spell.IsSpellUsable(spell)
+    else usable = IsUsableSpell(spell) end
+    if issecret(usable) then return nil end
+    return usable and true or false
 end
 
--- true = no alcance, false = fora de alcance, nil = feitico sem alcance
+-- true = no alcance, false = fora de alcance, nil = sem alcance ou desconhecido
 local function SpellInRange(spell, unit)
-    if C_Spell and C_Spell.IsSpellInRange then return C_Spell.IsSpellInRange(spell, unit) end
-    local r = IsSpellInRange(spell, unit)
-    if r == nil then return nil end
-    return r == 1
+    local r
+    if C_Spell and C_Spell.IsSpellInRange then r = C_Spell.IsSpellInRange(spell, unit)
+    else r = IsSpellInRange(spell, unit) end
+    if r == nil or issecret(r) then return nil end
+    return r == true or r == 1
 end
 
 -- Itera auras de uma unidade: fn(name, dispelType, source, expiration, stacks)
--- retornar true dentro de fn interrompe a iteracao.
+-- retornar true dentro de fn interrompe a iteracao. Auras secretas sao puladas.
 local function ForEachAura(unit, filter, fn)
     if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
         for i = 1, 40 do
             local a = C_UnitAuras.GetAuraDataByIndex(unit, i, filter)
-            if not a then return end
-            if fn(a.name, a.dispelName, a.sourceUnit, a.expirationTime, a.applications) then return end
+            if not a or issecret(a) then return end
+            local name = Pub(a.name)
+            if name and fn(name, Pub(a.dispelName), Pub(a.sourceUnit), Pub(a.expirationTime), Pub(a.applications)) then
+                return
+            end
         end
     else
         for i = 1, 40 do
             local name, _, count, dtype, _, expiration, source = UnitAura(unit, i, filter)
-            if not name then return end
-            if fn(name, dtype, source, expiration, count) then return end
+            if name == nil then return end
+            name = Pub(name)
+            if name and fn(name, Pub(dtype), Pub(source), Pub(expiration), Pub(count)) then return end
         end
     end
 end
 
+-- Porcentagem de vida, ou nil quando a vida esta secreta
 local function UnitPct(unit)
-    local max = UnitHealthMax(unit)
-    if not max or max == 0 then return 100 end
-    return UnitHealth(unit) / max * 100
+    local cur, max = Pub(UnitHealth(unit)), Pub(UnitHealthMax(unit))
+    if not cur or not max or max == 0 then return nil end
+    return cur / max * 100
 end
 
 ---------------------------------------------------------------------------
@@ -209,8 +240,7 @@ end
 local function Ready(key, unit)
     local name = N[key]
     if not name or not known[name] then return false end
-    local usable = SpellUsable(name)
-    if not usable then return false end
+    if SpellUsable(name) == false then return false end
     local start, duration = SpellCooldown(name)
     if start > 0 and duration > 1.6 and (start + duration - GetTime()) > 0.25 then return false end
     if unit and unit ~= "player" and UnitExists(unit) and SpellInRange(name, unit) == false then
@@ -276,11 +306,11 @@ local function FormatKey(key)
 end
 
 local function SlotSpellName(slot)
-    local actionType, id = GetActionInfo(slot)
+    local actionType, id = PubAll(GetActionInfo(slot))
     if actionType == "spell" and id then
         return (SpellInfo(id))
     elseif actionType == "macro" and id then
-        local s = GetMacroSpell(id)
+        local s = Pub(GetMacroSpell(id))
         if type(s) == "number" then return (SpellInfo(s)) end
         return s
     end
@@ -289,7 +319,7 @@ end
 local function RebuildKeyCache()
     wipe(keyCache)
     for slot = 1, 120 do
-        if HasAction(slot) then
+        if Is(HasAction(slot)) then
             local name = SlotSpellName(slot)
             if name and not keyCache[name] then
                 local key = KeyForSlot(slot)
@@ -312,36 +342,54 @@ end
 local c = {}                     -- contexto reaproveitado (sem lixo por frame)
 local playerBuffs, playerDebuffs, targetMine, targetAny = {}, {}, {}, {}
 local groupUnits = {}
-local cleuCast                   -- fallback de cast do alvo via combat log
-local recentEnemies = {}         -- [GUID] = ultimo instante em combate conosco
 local dispelScan = {}            -- [tipo] = unidade com debuff daquele tipo
 local lowest = { unit = nil, pct = 100 }
 local injuredCount = 0
 local lastGroupScan = 0
-local playerGUID
 
-local function CollectAuras(unit, filter, store, mineOnly)
+-- Auras secretas: quando o jogo esconde as auras, "buff ausente" nao pode ser
+-- concluido. auraSecret[unit] = true faz as regras de "falta X" ficarem mudas.
+local auraSecret = {}
+
+local function AurasAreSecret()
+    if not (C_Secrets and C_Secrets.ShouldAurasBeSecret) then return false end
+    local ok, v = pcall(C_Secrets.ShouldAurasBeSecret)
+    if not ok or issecret(v) then return true end
+    return v and true or false
+end
+
+local function CollectAuras(unit, filter, store, mineOnly, tag)
     wipe(store)
     if not UnitExists(unit) then return end
-    local now = GetTime()
+    local now, raw, seen = GetTime(), 0, 0
+    if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
+        -- conta auras existentes x auras legiveis para detectar ocultacao
+        for i = 1, 40 do
+            local a = C_UnitAuras.GetAuraDataByIndex(unit, i, filter)
+            if not a then break end
+            raw = raw + 1
+        end
+    end
     ForEachAura(unit, filter, function(name, _, source, expiration)
+        seen = seen + 1
         if not mineOnly or source == "player" or source == "pet" then
             local remain = (expiration and expiration > 0) and (expiration - now) or 999
             if not store[name] or store[name] < remain then store[name] = remain end
         end
     end)
+    if tag then auraSecret[tag] = (seen < raw) or (c.inCombat and AurasAreSecret()) end
 end
 
 local function RefreshGroupUnits()
     wipe(groupUnits)
     groupUnits[1] = "player"
-    if IsInRaid() then
-        for i = 1, GetNumGroupMembers() do
+    if Is(IsInRaid()) then
+        for i = 1, Pub(GetNumGroupMembers()) or 0 do
             local u = "raid" .. i
             if not UnitIsUnit(u, "player") then groupUnits[#groupUnits + 1] = u end
         end
-    elseif IsInGroup() then
-        for i = 1, GetNumSubgroupMembers() do groupUnits[#groupUnits + 1] = "party" .. i end
+    elseif Is(IsInGroup()) then
+        for i = 1, Pub(GetNumSubgroupMembers()) or 0 do groupUnits[#groupUnits + 1] = "party" .. i end
     end
 end
 
@@ -352,10 +400,10 @@ local function ScanGroup()
     lowest.unit, lowest.pct = nil, 100
     injuredCount = 0
     for _, u in ipairs(groupUnits) do
-        if UnitExists(u) and not UnitIsDeadOrGhost(u) and UnitIsConnected(u) and UnitIsVisible(u) then
-            local pct = UnitPct(u)
-            if pct < 80 then injuredCount = injuredCount + 1 end
-            if pct < lowest.pct then lowest.unit, lowest.pct = u, pct end
+        if UnitExists(u) and not UnitIsDeadOrGhost(u) and Is(UnitIsConnected(u)) and Is(UnitIsVisible(u)) then
+            local pct = UnitPct(u)  -- nil = vida secreta: aliado ignorado para cura
+            if pct and pct < 80 then injuredCount = injuredCount + 1 end
+            if pct and pct < lowest.pct then lowest.unit, lowest.pct = u, pct end
             ForEachAura(u, "HARMFUL", function(name, dtype)
                 if dtype and dtype ~= "" and not dispelScan[dtype] then
                     dispelScan[dtype] = { unit = u, name = name }
@@ -367,25 +415,24 @@ end
 
 local function UnitInMyGroup(unit)
     if not UnitExists(unit) then return false end
-    return UnitIsUnit(unit, "player") or UnitInParty(unit) or UnitInRaid(unit) ~= nil
+    return UnitIsUnit(unit, "player") or Is(UnitInParty(unit)) or Pub(UnitInRaid(unit)) ~= nil
 end
 
+-- Cast do alvo. Campos secretos viram "desconhecido": sem duracao assume 1s,
+-- sem a flag de interrupcao assume interrompivel (o jogo recusa se nao for).
 local function ReadTargetCast()
     if not c.hostile then return nil end
     local name, _, _, _, endMS, _, _, notInt = UnitCastingInfo("target")
-    if not name then
+    if name == nil then
         name, _, _, _, endMS, _, notInt = UnitChannelInfo("target")
     end
+    if name == nil then return nil end
     local cast = c.castData
-    if name then
-        cast.name = name
-        cast.remaining = endMS and (endMS / 1000 - GetTime()) or 1
-        cast.interruptible = not notInt
-    elseif cleuCast and cleuCast.guid == UnitGUID("target") and GetTime() - cleuCast.t < 3 then
-        cast.name, cast.remaining, cast.interruptible = cleuCast.name, 3 - (GetTime() - cleuCast.t), true
-    else
-        return nil
-    end
+    cast.name = Pub(name) or "feitico do inimigo"
+    endMS = Pub(endMS)
+    cast.remaining = endMS and (endMS / 1000 - GetTime()) or 1
+    notInt = Pub(notInt)
+    cast.interruptible = not notInt
     cast.onGroup = UnitInMyGroup("targettarget")
     cast.onMe = UnitExists("targettarget") and UnitIsUnit("targettarget", "player")
     return cast
@@ -401,11 +448,16 @@ local function Near(unit)
             if r ~= nil then return r end
         end
     end
-    local ok, r = pcall(CheckInteractDistance, unit, 3)
-    if ok and r ~= nil then return r and true or false end
+    -- CheckInteractDistance e restrito em combate: so e usado fora dele.
+    if not InCombatLockdown() then
+        local ok, r = pcall(CheckInteractDistance, unit, 3)
+        if ok and r ~= nil and not issecret(r) then return r and true or false end
+    end
     return UnitExists(unit .. "target") and UnitIsUnit(unit .. "target", "player")
 end
 
+-- Conta inimigos em combate pelas placas de nome (o log de combate e proibido
+-- para addons no Forever).
 local function CountEnemies()
     local total, near = 0, 0
     for i = 1, 40 do
@@ -415,12 +467,7 @@ local function CountEnemies()
             if Near(u) then near = near + 1 end
         end
     end
-    local now, logCount = GetTime(), 0
-    for guid, t in pairs(recentEnemies) do
-        if now - t > 5 then recentEnemies[guid] = nil else logCount = logCount + 1 end
-    end
-    if total == 0 then near = logCount end
-    return math.max(total, logCount), near
+    return total, near
 end
 
 local CREATURE_UNDEAD = { ["Undead"] = true, ["Morto-vivo"] = true, ["Morta-viva"] = true }
@@ -429,30 +476,34 @@ local CREATURE_DEMON  = { ["Demon"] = true, ["Demônio"] = true }
 local function BuildContext()
     c.now = GetTime()
     c.inCombat = UnitAffectingCombat("player")
-    c.hp = UnitPct("player")
-    local maxPow = UnitPowerMax("player")
-    c.power = UnitPower("player")
-    c.powerPct = (maxPow and maxPow > 0) and (c.power / maxPow * 100) or 100
-    local maxMana = UnitPowerMax("player", 0)
-    c.manaPct = (maxMana and maxMana > 0) and (UnitPower("player", 0) / maxMana * 100) or 100
-    c.cp = GetComboPoints("player", "target") or 0
-    c.grouped = IsInGroup()
+    -- Valores desconhecidos (secretos) recebem um padrao "neutro" que nao
+    -- dispara regras: vida 100%, recurso 0, mana 100%.
+    c.hp = UnitPct("player") or 100
+    c.hpKnown = UnitPct("player") ~= nil
+    local maxPow, pow = Pub(UnitPowerMax("player")), Pub(UnitPower("player"))
+    c.power = pow or 0
+    c.powerPct = (pow and maxPow and maxPow > 0) and (pow / maxPow * 100) or 0
+    local maxMana, mana = Pub(UnitPowerMax("player", 0)), Pub(UnitPower("player", 0))
+    c.manaPct = (mana and maxMana and maxMana > 0) and (mana / maxMana * 100) or 100
+    c.cp = Pub(GetComboPoints("player", "target")) or 0
+    c.grouped = Is(IsInGroup())
 
     c.target = UnitExists("target")
     c.hostile = c.target and UnitCanAttack("player", "target") and not UnitIsDead("target")
     c.thp = c.target and UnitPct("target") or 100
-    local class = c.target and UnitClassification("target") or "normal"
-    c.elite = class == "elite" or class == "worldboss" or class == "rareelite" or UnitLevel("target") == -1
+    local class = c.target and Pub(UnitClassification("target")) or "normal"
+    c.elite = class == "elite" or class == "worldboss" or class == "rareelite"
+              or (c.target and Pub(UnitLevel("target")) == -1)
     c.melee = c.hostile and Near("target")
-    local ctype = c.target and UnitCreatureType("target")
+    local ctype = c.target and Pub(UnitCreatureType("target"))
     c.undeadOrDemon = ctype and (CREATURE_UNDEAD[ctype] or CREATURE_DEMON[ctype]) or false
-    c.threat = (c.hostile and UnitThreatSituation and UnitThreatSituation("player", "target")) or 0
+    c.threat = (c.hostile and UnitThreatSituation and Pub(UnitThreatSituation("player", "target"))) or 0
     c.targetOnAlly = c.hostile and UnitExists("targettarget") and not UnitIsUnit("targettarget", "player")
                      and UnitInMyGroup("targettarget")
 
-    CollectAuras("player", "HELPFUL", playerBuffs)
+    CollectAuras("player", "HELPFUL", playerBuffs, false, "player")
     CollectAuras("player", "HARMFUL", playerDebuffs)
-    CollectAuras("target", "HARMFUL", targetMine, true)
+    CollectAuras("target", "HARMFUL", targetMine, true, "target")
     CollectAuras("target", "HARMFUL", targetAny)
 
     c.castData = c.castData or {}
@@ -470,19 +521,45 @@ local function BuildContext()
     c.petHp = UnitExists("pet") and UnitPct("pet") or 100
 end
 
--- Ajudantes de leitura de estado (por chave do ID)
+-- Ajudantes de leitura de estado (por chave do ID).
+-- Buff/OnTarget = "tenho certeza que ESTA ativo".
+-- Lacks/NotOnTarget = "tenho certeza que NAO esta" (falso se as auras estao secretas).
 local function Buff(key) return N[key] and playerBuffs[N[key]] end
 local function Debuff(key) return N[key] and playerDebuffs[N[key]] end
 local function OnTarget(key) return N[key] and targetMine[N[key]] end         -- debuff MEU no alvo
 local function OnTargetAny(key) return N[key] and targetAny[N[key]] end       -- debuff de qualquer um
-local function AnyBuff(...) for i = 1, select("#", ...) do if Buff((select(i, ...))) then return true end end end
+local function Lacks(key) return not auraSecret.player and not Buff(key) end
+local function NotOnTarget(key) return not auraSecret.target and not OnTarget(key) end
+local function NotOnTargetAny(key) return not auraSecret.target and not OnTargetAny(key) end
 local function AnyOnTarget(...) for i = 1, select("#", ...) do if OnTarget((select(i, ...))) then return true end end end
 
+-- true = tem, false = nao tem, nil = desconhecido (auras secretas)
 local function UnitHasAura(unit, key, filter)
     local name, found = N[key], false
     if not name then return false end
+    if c.inCombat and AurasAreSecret() then return nil end
     ForEachAura(unit, filter, function(n) if n == name then found = true; return true end end)
     return found
+end
+local function UnitLacksAura(unit, key, filter) return UnitHasAura(unit, key, filter) == false end
+
+-- Forma/postura ativa pela barra de formas (nao depende de auras, que podem
+-- estar secretas). Retorna o nome localizado da forma ou nil.
+local function ActiveFormName()
+    local n = Pub(GetNumShapeshiftForms and GetNumShapeshiftForms()) or 0
+    for i = 1, n do
+        local _, active, _, sid = GetShapeshiftFormInfo(i)
+        if Is(active) then
+            sid = Pub(sid)
+            return sid and (SpellInfo(sid)) or nil
+        end
+    end
+end
+local function InForm(...)
+    local form = ActiveFormName()
+    if not form then return false end
+    for i = 1, select("#", ...) do if N[(select(i, ...))] == form then return true end end
+    return false
 end
 
 local function TargetHasMagicBuff()
@@ -506,7 +583,7 @@ end
 
 local function UnitLabel(unit)
     if not unit or unit == "player" then return "voce" end
-    return UnitName(unit) or unit
+    return Pub(UnitName(unit)) or "aliado"
 end
 
 -- Interrupcao: alvo hostil castando algo interrompivel
@@ -535,6 +612,7 @@ local function SelfBuff(pick, family, inCombatToo)
     family = family or (type(pick) == "table" and pick or { pick })
     return R("BUFF", pick, function(c)
         if c.inCombat and not inCombatToo then return false end
+        if auraSecret.player then return false end
         for _, k in ipairs(family) do if Buff(k) then return false end end
         return true
     end, "Buff ausente", "player")
@@ -563,7 +641,7 @@ end
 
 local function Taunt(pick, isTank)
     return R("TAUNT", pick, function(c) return c.grouped and isTank(c) and c.targetOnAlly end,
-        function() return "Alvo atacando " .. (UnitName("targettarget") or "aliado") .. "! Provoque" end, "target")
+        function() return "Alvo atacando " .. (Pub(UnitName("targettarget")) or "aliado") .. "! Provoque" end, "target")
 end
 
 -- Habilidade ofensiva sobre o alvo hostil
@@ -577,7 +655,7 @@ end
 local CLASS_RULES = {}
 
 CLASS_RULES.WARRIOR = function()
-    local function tank() return GetShapeshiftForm() == 2 end -- Postura Defensiva
+    local function tank() return Pub(GetShapeshiftForm()) == 2 end -- Postura Defensiva
     return {
         Emergency("SHIELD_WALL", 25),
         Emergency("LAST_STAND", 30),
@@ -592,13 +670,13 @@ CLASS_RULES.WARRIOR = function()
         R("AOE", "SWEEPING", function(c) return c.inCombat and c.meleeAoe end, "Varios mobs: ative Golpes Amplos"),
         Hit("AOE", "WHIRLWIND", function(c) return c.near >= 2 end,
             function() return Buff("SWEEPING") and "COMBO Golpes Amplos -> Redemoinho" or "Varios mobs: Redemoinho" end),
-        Hit("AOE", "THUNDER_CLAP", function(c) return c.meleeAoe and not OnTargetAny("THUNDER_CLAP") end, "Area: Trovoada"),
-        Hit("AOE", "DEMO_SHOUT", function(c) return c.meleeAoe and not OnTargetAny("DEMO_SHOUT") end, "Area: Grito Desmoralizante"),
+        Hit("AOE", "THUNDER_CLAP", function(c) return c.meleeAoe and NotOnTargetAny("THUNDER_CLAP") end, "Area: Trovoada"),
+        Hit("AOE", "DEMO_SHOUT", function(c) return c.meleeAoe and NotOnTargetAny("DEMO_SHOUT") end, "Area: Grito Desmoralizante"),
         Hit("AOE", "CLEAVE", function(c) return c.near >= 2 and c.power >= 40 end, "Raiva sobrando: Cutilada"),
         Hit("ROTATION", "SHIELD_SLAM", nil, "Golpe de Escudo"),
         Hit("ROTATION", { "BLOODTHIRST", "MORTAL_STRIKE" }, nil, "Golpe principal"),
-        Hit("ROTATION", "SUNDER", function(c) return tank() and not OnTarget("SUNDER") end, "Gere ameaca: Fender Armadura"),
-        Hit("ROTATION", "REND", function(c) return c.thp > 30 and not OnTarget("REND") end, "Aplique Dilacerar"),
+        Hit("ROTATION", "SUNDER", function(c) return tank() and NotOnTarget("SUNDER") end, "Gere ameaca: Fender Armadura"),
+        Hit("ROTATION", "REND", function(c) return c.thp > 30 and NotOnTarget("REND") end, "Aplique Dilacerar"),
         Hit("ROTATION", "HEROIC_STRIKE", function(c) return c.power >= 50 end, "Raiva alta: Golpe Heroico"),
     }
 end
@@ -612,7 +690,7 @@ CLASS_RULES.ROGUE = function()
         Hit("INTERRUPT", "KIDNEY", function(c) return c.cast and c.cp >= 1 end, "Sem Chute: Golpe nos Rins"),
         R("AOE", "BLADE_FLURRY", function(c) return c.inCombat and c.near >= 2 end, "Varios mobs: Rajada de Laminas"),
         Hit("COMBO", "RIPOSTE", nil, "Aparou! Ripostar"),
-        Hit("COMBO", "SND", function(c) return c.cp >= 2 and not Buff("SND") and c.thp > 25 end,
+        Hit("COMBO", "SND", function(c) return c.cp >= 2 and Lacks("SND") and c.thp > 25 end,
             "Pontos de combo: ative Picar"),
         Hit("COMBO", "EVISCERATE", function(c) return c.cp >= 5 or (c.cp >= 2 and c.thp < 15) end,
             function(c) return c.cp .. " pontos: Eviscerar!" end),
@@ -633,15 +711,15 @@ CLASS_RULES.MAGE = function()
             "Inimigo colado: Nova Congelante e afaste-se"),
         Interrupt("COUNTERSPELL"),
         Dispel("REMOVE_LESSER_CURSE", { "Curse" }),
-        R("DEFENSIVE", "ICE_BARRIER", function(c) return c.inCombat and c.hp < 80 and not Buff("ICE_BARRIER") end, "Escudo: Barreira de Gelo"),
-        R("DEFENSIVE", "MANA_SHIELD", function(c) return c.inCombat and c.hp < 40 and not Buff("MANA_SHIELD") end, "Vida baixa: Escudo de Mana"),
+        R("DEFENSIVE", "ICE_BARRIER", function(c) return c.inCombat and c.hp < 80 and Lacks("ICE_BARRIER") end, "Escudo: Barreira de Gelo"),
+        R("DEFENSIVE", "MANA_SHIELD", function(c) return c.inCombat and c.hp < 40 and Lacks("MANA_SHIELD") end, "Vida baixa: Escudo de Mana"),
         R("COMBO", "EVOCATION", function(c) return c.inCombat and c.manaPct < 12 end, "Sem mana: Evocacao"),
         Hit("COMBO", "PYROBLAST", function() return Buff("PRESENCE_OF_MIND") end, "COMBO Presenca da Mente -> Piroblasto"),
         R("COMBO", "ARCANE_EXPLOSION", function(c) return Buff("MAGE_CLEARCAST") and c.meleeAoe end, "COMBO Clarividencia -> Explosao Arcana gratis"),
         Hit("COMBO", fill, function() return Buff("MAGE_CLEARCAST") end, "COMBO Clarividencia -> feitico forte gratis"),
         R("COMBO", "PRESENCE_OF_MIND", function(c) return c.hostile and c.inCombat end, "Prepare: Presenca da Mente (depois Piroblasto)"),
         R("COMBO", { "ARCANE_POWER", "COMBUSTION" }, function(c) return c.hostile and c.inCombat and c.elite end, "Elite/chefe: ative cooldown de dano"),
-        R("AOE", "FROST_NOVA", function(c) return c.inCombat and c.meleeAoe and not OnTargetAny("FROST_NOVA") end, "FARM: Nova Congelante -> Explosao Arcana"),
+        R("AOE", "FROST_NOVA", function(c) return c.inCombat and c.meleeAoe and NotOnTargetAny("FROST_NOVA") end, "FARM: Nova Congelante -> Explosao Arcana"),
         R("AOE", "CONE_OF_COLD", function(c) return c.meleeAoe and c.hostile end, "Area: Cone de Gelo"),
         R("AOE", "ARCANE_EXPLOSION", function(c) return c.meleeAoe end, "Mobs agrupados: Explosao Arcana"),
         R("AOE", "BLIZZARD", function(c) return c.enemies >= DB.aoe + 1 and not c.meleeAoe end, "Mobs a distancia: Nevasca"),
@@ -654,7 +732,7 @@ CLASS_RULES.MAGE = function()
 end
 
 CLASS_RULES.PRIEST = function()
-    local function canShield(c, u) return not UnitHasAura(u, "WEAKENED_SOUL", "HARMFUL") and not UnitHasAura(u, "PW_SHIELD", "HELPFUL") end
+    local function canShield(c, u) return UnitLacksAura(u, "WEAKENED_SOUL", "HARMFUL") and UnitLacksAura(u, "PW_SHIELD", "HELPFUL") end
     return {
         Emergency("DESPERATE_PRAYER", 30),
         R("EMERGENCY", "PW_SHIELD", function(c) return c.inCombat and c.hp < 50 and canShield(c, "player") end, "Vida baixa: Escudo em voce", "player"),
@@ -668,10 +746,10 @@ CLASS_RULES.PRIEST = function()
         R("COMBO", { "GREATER_HEAL", "HEAL" }, function(c, u) return Buff("INNER_FOCUS") and u and c.lowestPct < 70 end,
             "COMBO Foco Interior -> cura grande gratis", function(c) return c.lowest end),
         HealLowest({ "GREATER_HEAL", "HEAL", "LESSER_HEAL" }, 60),
-        HealLowest("RENEW", 85, function(c, u) return not UnitHasAura(u, "RENEW", "HELPFUL") end),
+        HealLowest("RENEW", 85, function(c, u) return UnitLacksAura(u, "RENEW", "HELPFUL") end),
         Hit("COMBO", "MIND_BLAST", function() return Buff("INNER_FOCUS") end, "COMBO Foco Interior -> Explosao Mental"),
         SelfBuff("SHADOWFORM", nil, true),
-        Hit("ROTATION", "SWP", function(c) return not OnTarget("SWP") and c.thp > 20 end, "Aplique Palavra Sombria: Dor"),
+        Hit("ROTATION", "SWP", function(c) return NotOnTarget("SWP") and c.thp > 20 end, "Aplique Palavra Sombria: Dor"),
         Hit("ROTATION", "HOLY_FIRE", function(c) return not c.inCombat end, "Abertura: Fogo Sagrado"),
         Hit("ROTATION", "MIND_BLAST", nil, "Explosao Mental"),
         Hit("ROTATION", { "MIND_FLAY", "SMITE" }, nil, "Dano continuo"),
@@ -695,12 +773,12 @@ CLASS_RULES.PALADIN = function()
         HealLowest("HOLY_SHOCK", 50),
         HealLowest("HOLY_LIGHT", 45),
         HealLowest("FOL", 75),
-        R("COMBO", { "SOC", "SOR" }, function(c) return (c.hostile or c.inCombat) and not hasSeal() end,
+        R("COMBO", { "SOC", "SOR" }, function(c) return (c.hostile or c.inCombat) and not auraSecret.player and not hasSeal() end,
             "Sem selo: ative o Selo (depois Julgamento)", "player"),
         Hit("COMBO", "JUDGEMENT", function() return hasSeal() end, "COMBO Selo ativo -> Julgamento (e reaplique o selo)"),
         Hit("COMBO", "HOW", nil, "Alvo < 20%: Martelo da Colera"),
         R("AOE", "CONSECRATION", function(c) return c.meleeAoe and c.manaPct > 30 end, "Varios mobs: Consagracao"),
-        R("ROTATION", "HOLY_SHIELD", function(c) return c.inCombat and Buff("RIGHTEOUS_FURY") and not Buff("HOLY_SHIELD") end, "Tank: Escudo Sagrado"),
+        R("ROTATION", "HOLY_SHIELD", function(c) return c.inCombat and Buff("RIGHTEOUS_FURY") and Lacks("HOLY_SHIELD") end, "Tank: Escudo Sagrado"),
         Hit("ROTATION", "EXORCISM", function(c) return c.undeadOrDemon end, "Morto-vivo/Demonio: Exorcismo"),
         SelfBuff({ "DEVOTION", "RET_AURA" }, { "DEVOTION", "RET_AURA" }, true),
         SelfBuff({ "BOM", "BOW", "BOK" }, { "BOM", "BOW", "BOK", "BOSANC" }),
@@ -713,14 +791,14 @@ CLASS_RULES.HUNTER = function()
         Emergency("DETERRENCE", 35, function(c) return c.melee end, "Apanhando corpo a corpo: Dissuasao"),
         R("HEAL", "MEND_PET", function(c) return c.inCombat and c.petHp < 40 end, "Pet morrendo: Curar Ajudante", "pet"),
         Hit("INTERRUPT", "SCATTER", function(c) return c.cast and c.cast.interruptible end, function(c) return "Interrompa: " .. c.cast.name end),
-        R("BUFF", "HAWK", function(c) return c.hostile and not c.melee and not Buff("HAWK") end, "Combate a distancia: Aspecto do Falcao", "player"),
+        R("BUFF", "HAWK", function(c) return c.hostile and not c.melee and Lacks("HAWK") end, "Combate a distancia: Aspecto do Falcao", "player"),
         Hit("COMBO", "MONGOOSE", function(c) return c.melee end, "Alvo esquivou: Mordida do Mangusto"),
-        Hit("ROTATION", "WING_CLIP", function(c) return c.melee and not OnTarget("WING_CLIP") and not c.grouped end, "Colado: Cortar Asas e afaste-se"),
+        Hit("ROTATION", "WING_CLIP", function(c) return c.melee and NotOnTarget("WING_CLIP") and not c.grouped end, "Colado: Cortar Asas e afaste-se"),
         Hit("ROTATION", "RAPTOR", function(c) return c.melee end, "Corpo a corpo: Golpe do Raptor"),
-        Hit("ROTATION", "MARK", function(c) return not OnTargetAny("MARK") and (c.elite or c.thp > 60) end, "Marque o alvo"),
+        Hit("ROTATION", "MARK", function(c) return NotOnTargetAny("MARK") and (c.elite or c.thp > 60) end, "Marque o alvo"),
         Hit("AOE", { "VOLLEY", "MULTI" }, function(c) return c.aoe end, "Varios mobs: dano em area"),
         R("ROTATION", "RAPID_FIRE", function(c) return c.hostile and c.inCombat and c.elite end, "Elite/chefe: Disparo Rapido"),
-        Hit("ROTATION", "SERPENT", function(c) return not OnTarget("SERPENT") and c.thp > 30 end, "Aplique Picada da Serpente"),
+        Hit("ROTATION", "SERPENT", function(c) return NotOnTarget("SERPENT") and c.thp > 30 end, "Aplique Picada da Serpente"),
         Hit("ROTATION", "AIMED", function(c) return not c.melee end, "Tiro Mirado"),
         Hit("ROTATION", "MULTI", function(c) return not c.melee end, "Tiro Multiplo"),
         Hit("ROTATION", "ARCANE_SHOT", function(c) return not c.melee end, "Tiro Arcano"),
@@ -736,22 +814,26 @@ CLASS_RULES.WARLOCK = function()
         Interrupt("DEATH_COIL"),
         Hit("COMBO", "SHADOW_BOLT", function() return Buff("SHADOW_TRANCE") end, "COMBO Transe Sombrio -> Seta Sombria instantanea!"),
         Hit("COMBO", "SHADOWBURN", function(c) return c.thp < 20 end, "Finalize: Queimadura Sombria"),
-        Hit("COMBO", "DRAIN_SOUL", function(c) return c.thp < 12 and GetItemCount(6265) < 5 end, "Alvo morrendo: Drenar Alma (fragmento)"),
+        Hit("COMBO", "DRAIN_SOUL", function(c) return c.thp < 12 and (Pub(GetItemCount(6265)) or 99) < 5 end, "Alvo morrendo: Drenar Alma (fragmento)"),
         R("COMBO", "LIFE_TAP", function(c) return c.manaPct < 25 and c.hp > 60 end, "Mana baixa, vida alta: Toque da Vida", "player"),
         Hit("ROTATION", "DRAIN_LIFE", function(c) return c.hp < 45 end, "Recupere vida: Drenar Vida"),
         Hit("AOE", "RAIN_OF_FIRE", function(c) return c.aoe and not c.meleeAoe end, "Varios mobs: Chuva de Fogo"),
         R("AOE", "HELLFIRE", function(c) return c.meleeAoe and c.hp > 50 end, "Mobs colados: Fogo do Inferno"),
-        Hit("ROTATION", "CORRUPTION", function(c) return not OnTarget("CORRUPTION") and c.thp > 20 end, "Aplique Corrupcao"),
-        Hit("ROTATION", "COA", function(c) return not anyCurse() and c.thp > 30 end, "Aplique uma Maldicao"),
-        Hit("ROTATION", "IMMOLATE", function(c) return not OnTarget("IMMOLATE") and c.thp > 30 end, "Aplique Imolar"),
+        Hit("ROTATION", "CORRUPTION", function(c) return NotOnTarget("CORRUPTION") and c.thp > 20 end, "Aplique Corrupcao"),
+        Hit("ROTATION", "COA", function(c) return not auraSecret.target and not anyCurse() and c.thp > 30 end, "Aplique uma Maldicao"),
+        Hit("ROTATION", "IMMOLATE", function(c) return NotOnTarget("IMMOLATE") and c.thp > 30 end, "Aplique Imolar"),
         Hit("ROTATION", "SHADOW_BOLT", nil, "Seta Sombria"),
         SelfBuff({ "DEMON_ARMOR", "DEMON_SKIN" }),
     }
 end
 
 CLASS_RULES.SHAMAN = function()
-    local function weaponMissing() local mh = GetWeaponEnchantInfo(); return not mh end
-    local function noFireTotem() if not GetTotemInfo then return false end local has = GetTotemInfo(1); return not has end
+    local function weaponMissing() local mh = GetWeaponEnchantInfo(); return mh ~= nil and not issecret(mh) and not mh end
+    local function noFireTotem()
+        if not GetTotemInfo then return false end
+        local has = GetTotemInfo(1)
+        return not issecret(has) and not has
+    end
     return {
         R("EMERGENCY", "NS_SHAMAN", function(c) return c.inCombat and c.lowestPct < 30 end, "Emergencia: Rapidez da Natureza -> Onda Curativa"),
         R("COMBO", "HEALING_WAVE", function(c, u) return Buff("NS_SHAMAN") and u and c.lowestPct < 60 end,
@@ -773,15 +855,15 @@ CLASS_RULES.SHAMAN = function()
         R("AOE", { "MAGMA", "FIRE_NOVA" }, function(c) return c.meleeAoe and noFireTotem() end, "Varios mobs: totem de fogo em area"),
         Hit("AOE", "CHAIN_LIGHTNING", function(c) return c.enemies >= 2 end, "Varios mobs: Cadeia de Raios"),
         R("ROTATION", "SEARING", function(c) return c.hostile and c.inCombat and noFireTotem() end, "Totem Calcinante"),
-        Hit("ROTATION", "FLAME_SHOCK", function(c) return not OnTarget("FLAME_SHOCK") and c.thp > 30 end, "Aplique Choque Flamejante"),
+        Hit("ROTATION", "FLAME_SHOCK", function(c) return NotOnTarget("FLAME_SHOCK") and c.thp > 30 end, "Aplique Choque Flamejante"),
         Hit("ROTATION", "EARTH_SHOCK", function(c) return c.melee and c.manaPct > 50 end, "Choque Terreno"),
         Hit("ROTATION", "LIGHTNING_BOLT", function(c) return not c.melee or not c.inCombat end, "Raio"),
     }
 end
 
 CLASS_RULES.DRUID = function()
-    local function bear() return Buff("BEAR") or Buff("DIRE_BEAR") end
-    local function cat() return Buff("CAT") end
+    local function bear() return InForm("BEAR", "DIRE_BEAR") end
+    local function cat() return InForm("CAT") end
     local function caster() return not bear() and not cat() end
     return {
         Emergency("BARKSKIN", 40),
@@ -795,30 +877,30 @@ CLASS_RULES.DRUID = function()
         HealLowest("SWIFTMEND", 40, function(c, u) return UnitHasAura(u, "REJUV", "HELPFUL") or UnitHasAura(u, "REGROWTH", "HELPFUL") end),
         HealLowest("REGROWTH", 45, function() return caster() end),
         HealLowest("HEALING_TOUCH", 55, function() return caster() end),
-        HealLowest("REJUV", 85, function(c, u) return caster() and not UnitHasAura(u, "REJUV", "HELPFUL") end),
+        HealLowest("REJUV", 85, function(c, u) return caster() and UnitLacksAura(u, "REJUV", "HELPFUL") end),
         Taunt("GROWL", bear),
         -- Urso (tank)
         Hit("COMBO", "MAUL", function() return bear() and Buff("DRUID_CLEARCAST") end, "COMBO Clarividencia -> Espancar gratis"),
-        Hit("AOE", "DEMO_ROAR", function(c) return bear() and c.near >= 2 and not OnTargetAny("DEMO_ROAR") end, "Area: Rugido Desmoralizante"),
+        Hit("AOE", "DEMO_ROAR", function(c) return bear() and c.near >= 2 and NotOnTargetAny("DEMO_ROAR") end, "Area: Rugido Desmoralizante"),
         Hit("AOE", "SWIPE", function(c) return bear() and c.near >= 2 end, "Varios mobs: Golpe Giratorio"),
         Hit("ROTATION", "MAUL", function(c) return bear() and c.power >= 15 end, "Espancar"),
         -- Gato (dano)
         Hit("COMBO", "SHRED", function() return cat() and Buff("DRUID_CLEARCAST") end, "COMBO Clarividencia -> Retalhar (por tras)"),
-        Hit("COMBO", "RIP", function(c) return cat() and c.cp >= 5 and not OnTarget("RIP") and c.thp > 40 end, "5 pontos: Rasgar"),
+        Hit("COMBO", "RIP", function(c) return cat() and c.cp >= 5 and NotOnTarget("RIP") and c.thp > 40 end, "5 pontos: Rasgar"),
         Hit("COMBO", "BITE", function(c) return cat() and (c.cp >= 5 or (c.cp >= 3 and c.thp < 20)) end, function(c) return c.cp .. " pontos: Mordida Feroz" end),
-        R("ROTATION", "TIGERS_FURY", function(c) return cat() and c.hostile and c.inCombat and not Buff("TIGERS_FURY") and c.power >= 80 end, "Furia do Tigre"),
-        Hit("ROTATION", "RAKE", function(c) return cat() and not OnTarget("RAKE") end, "Aplique Rasgadura"),
+        R("ROTATION", "TIGERS_FURY", function(c) return cat() and c.hostile and c.inCombat and Lacks("TIGERS_FURY") and c.power >= 80 end, "Furia do Tigre"),
+        Hit("ROTATION", "RAKE", function(c) return cat() and NotOnTarget("RAKE") end, "Aplique Rasgadura"),
         Hit("ROTATION", "CLAW", function() return cat() end, "Gere pontos: Garra"),
         -- Conjurador / Equilibrio
         Hit("COMBO", "STARFIRE", function() return caster() and Buff("DRUID_CLEARCAST") end, "COMBO Clarividencia -> Fogo Estelar gratis"),
         R("AOE", "HURRICANE", function(c) return caster() and c.enemies >= DB.aoe + 1 end, "Varios mobs: Furacao"),
-        Hit("ROTATION", "FAERIE_FIRE", function(c) return caster() and c.elite and not OnTargetAny("FAERIE_FIRE") end, "Elite: Fogo Feerico"),
-        Hit("ROTATION", "MOONFIRE", function(c) return caster() and not OnTarget("MOONFIRE") end, "Aplique Fogo Lunar"),
-        Hit("ROTATION", "INSECT_SWARM", function(c) return caster() and not OnTarget("INSECT_SWARM") and c.thp > 30 end, "Aplique Enxame de Insetos"),
+        Hit("ROTATION", "FAERIE_FIRE", function(c) return caster() and c.elite and NotOnTargetAny("FAERIE_FIRE") end, "Elite: Fogo Feerico"),
+        Hit("ROTATION", "MOONFIRE", function(c) return caster() and NotOnTarget("MOONFIRE") end, "Aplique Fogo Lunar"),
+        Hit("ROTATION", "INSECT_SWARM", function(c) return caster() and NotOnTarget("INSECT_SWARM") and c.thp > 30 end, "Aplique Enxame de Insetos"),
         Hit("ROTATION", "STARFIRE", function(c) return caster() and c.thp > 40 end, "Fogo Estelar"),
         Hit("ROTATION", "WRATH", function() return caster() end, "Ira"),
-        R("BUFF", "MOTW", function(c) return not c.inCombat and caster() and not Buff("MOTW") end, "Buff ausente", "player"),
-        R("BUFF", "THORNS", function(c) return not c.inCombat and caster() and not Buff("THORNS") end, "Buff ausente", "player"),
+        R("BUFF", "MOTW", function(c) return not c.inCombat and caster() and Lacks("MOTW") end, "Buff ausente", "player"),
+        R("BUFF", "THORNS", function(c) return not c.inCombat and caster() and Lacks("THORNS") end, "Buff ausente", "player"),
     }
 end
 
@@ -966,30 +1048,53 @@ local function HideSuggestion()
 end
 
 local testUntil = 0
+local combatSnap = { seen = false, active = false, shown = 0 } -- o que estava legivel no ultimo combate
 
-local function Update()
-    if not DB or not DB.enabled then hud:Hide(); return end
-    if GetTime() < testUntil then return end
-    if UnitIsDeadOrGhost("player") or UnitOnTaxi("player") or (IsMounted() and not UnitAffectingCombat("player")) then
+local function DoUpdate()
+    if UnitIsDeadOrGhost("player") or Is(UnitOnTaxi("player")) or (Is(IsMounted()) and not UnitAffectingCombat("player")) then
         HideSuggestion(); return
     end
     BuildContext()
+    if c.inCombat then
+        if not combatSnap.active then -- inicio de um novo combate
+            combatSnap.active, combatSnap.seen, combatSnap.shown = true, true, 0
+        end
+        combatSnap.hp = c.hpKnown
+        combatSnap.power = Pub(UnitPower("player")) ~= nil
+        combatSnap.auraP, combatSnap.auraT = auraSecret.player, auraSecret.target
+    else
+        combatSnap.active = false
+    end
     if DB.combatOnly and not c.inCombat then HideSuggestion(); return end
     local rule, key, unit = Evaluate()
     if not rule then HideSuggestion(); return end
+    if c.inCombat and key ~= current then combatSnap.shown = combatSnap.shown + 1 end
     local text = rule.msg
     if type(text) == "function" then text = text(c, unit) end
     local spell = N[key] or ""
     ShowSuggestion(key, rule.cat, (text and text ~= "" and (text .. "\n|cffaaaaaa" .. spell .. "|r")) or spell)
 end
 
+-- Rede de seguranca: se alguma API nova devolver algo inesperado, o addon so
+-- esconde o icone neste ciclo em vez de gerar erro de Lua a cada 0,1s.
+local lastError
+local function Update()
+    if not DB or not DB.enabled then hud:Hide(); return end
+    if GetTime() < testUntil then return end
+    local ok, err = pcall(DoUpdate)
+    if not ok then
+        lastError = err
+        hud:Hide()
+    end
+end
+
 ---------------------------------------------------------------------------
 -- 10. EVENTOS E COMANDOS
 ---------------------------------------------------------------------------
+-- O log de combate (COMBAT_LOG_EVENT_UNFILTERED) NAO e usado: no Forever ele e
+-- proibido para addons e gera o aviso "so disponivel para a interface da Blizzard".
 local core = CreateFrame("Frame")
 local elapsed = 0
-local band = bit.band
-local HOSTILE = COMBATLOG_OBJECT_REACTION_HOSTILE or 0x40
 
 core:SetScript("OnUpdate", function(_, dt)
     elapsed = elapsed + dt
@@ -998,28 +1103,6 @@ core:SetScript("OnUpdate", function(_, dt)
         Update()
     end
 end)
-
-local function OnCombatLog()
-    local _, sub, _, srcGUID, _, srcFlags, _, dstGUID, _, dstFlags, _, _, spellName = CombatLogGetCurrentEventInfo()
-    -- Fallback de cast do alvo (clientes onde UnitCastingInfo e limitado)
-    if srcGUID and srcGUID == UnitGUID("target") then
-        if sub == "SPELL_CAST_START" then
-            cleuCast = cleuCast or {}
-            cleuCast.guid, cleuCast.name, cleuCast.t = srcGUID, spellName, GetTime()
-        elseif sub == "SPELL_CAST_SUCCESS" or sub == "SPELL_CAST_FAILED" or sub == "SPELL_INTERRUPT" then
-            cleuCast = nil
-        end
-    end
-    if sub == "SPELL_INTERRUPT" and dstGUID == UnitGUID("target") then cleuCast = nil end
-    -- Contagem de inimigos em combate conosco (farm / AoE)
-    if sub == "UNIT_DIED" then if dstGUID then recentEnemies[dstGUID] = nil end; return end
-    if dstGUID == playerGUID and srcGUID and srcGUID ~= "" and srcFlags and band(srcFlags, HOSTILE) > 0 then
-        recentEnemies[srcGUID] = GetTime()
-    elseif srcGUID == playerGUID and dstGUID and dstGUID ~= "" and dstFlags and band(dstFlags, HOSTILE) > 0
-        and sub and sub:find("_DAMAGE") then
-        recentEnemies[dstGUID] = GetTime()
-    end
-end
 
 local function RefreshSpells()
     ResolveNames()
@@ -1037,19 +1120,23 @@ core:SetScript("OnEvent", function(_, event, arg1)
         DB = MVAT_DB
         core:UnregisterEvent("ADDON_LOADED")
     elseif event == "PLAYER_LOGIN" then
-        playerGUID = UnitGUID("player")
         ApplyLayout()
         RefreshSpells()
         LoadClassRules()
         for _, e in ipairs({ "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_LEVEL_UP", "CHARACTER_POINTS_CHANGED",
                              "ACTIONBAR_SLOT_CHANGED", "UPDATE_BINDINGS", "UPDATE_SHAPESHIFT_FORM",
-                             "UPDATE_BONUS_ACTIONBAR", "COMBAT_LOG_EVENT_UNFILTERED", "PLAYER_REGEN_ENABLED",
-                             "PLAYER_TARGET_CHANGED", "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_CHANNEL_START" }) do
-            pcall(core.RegisterEvent, core, e)
+                             "UPDATE_BONUS_ACTIONBAR", "PLAYER_TARGET_CHANGED" }) do
+            if not C_EventUtils or not C_EventUtils.IsEventValid or C_EventUtils.IsEventValid(e) then
+                core:RegisterEvent(e)
+            end
+        end
+        -- casts apenas do alvo atual (reacao instantanea a interrupts)
+        for _, e in ipairs({ "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_CHANNEL_START" }) do
+            if not C_EventUtils or not C_EventUtils.IsEventValid or C_EventUtils.IsEventValid(e) then
+                core:RegisterUnitEvent(e, "target")
+            end
         end
         print("|cff33ccffMVAT|r carregado para " .. (UnitClass("player")) .. ". Digite |cffffff00/mvat|r para opcoes.")
-    elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
-        OnCombatLog()
     elseif event == "SPELLS_CHANGED" or event == "LEARNED_SPELL_IN_TAB" or event == "PLAYER_LEVEL_UP"
         or event == "CHARACTER_POINTS_CHANGED" then
         RefreshSpells()
@@ -1057,13 +1144,9 @@ core:SetScript("OnEvent", function(_, event, arg1)
     elseif event == "ACTIONBAR_SLOT_CHANGED" or event == "UPDATE_BINDINGS"
         or event == "UPDATE_SHAPESHIFT_FORM" or event == "UPDATE_BONUS_ACTIONBAR" then
         RebuildKeyCache()
-    elseif event == "PLAYER_REGEN_ENABLED" then
-        wipe(recentEnemies)
-    elseif event == "PLAYER_TARGET_CHANGED" then
-        cleuCast = nil
+    elseif event == "PLAYER_TARGET_CHANGED"
+        or event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_CHANNEL_START" then
         elapsed = UPDATE_INTERVAL -- reavalia imediatamente
-    elseif event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_CHANNEL_START" then
-        if arg1 == "target" then elapsed = UPDATE_INTERVAL end -- reacao instantanea a casts do alvo
     end
 end)
 
@@ -1109,8 +1192,27 @@ local function Slash(input)
         for _, rule in ipairs(rules) do for _, k in ipairs(rule.pick) do if Known(k) then count = count + 1 end end end
         Msg(string.format("Classe %s | %d regras | %d habilidades aprendidas usadas | inimigos %s",
             tostring(playerClass), #rules, count, tostring(c.enemies)))
+    elseif cmd == "diag" then
+        local function yn(v) return v and "|cffff5555SECRETO|r" or "|cff55ff55liberado|r" end
+        local function should(fn)
+            if not (C_Secrets and C_Secrets[fn]) then return "n/d" end
+            local ok, v = pcall(C_Secrets[fn])
+            if not ok or issecret(v) then return "?" end
+            return tostring(v)
+        end
+        local _, build, _, iface = GetBuildInfo()
+        Msg("Diagnostico (build " .. tostring(build) .. ", interface " .. tostring(iface) .. ")")
+        Msg("Agora: auras=" .. should("ShouldAurasBeSecret") .. " recargas=" .. should("ShouldCooldownsBeSecret"))
+        if combatSnap.seen then
+            Msg("Ultimo combate: vida " .. yn(not combatSnap.hp) .. " | recurso " .. yn(not combatSnap.power)
+                .. " | auras proprias " .. yn(combatSnap.auraP) .. " | auras do alvo " .. yn(combatSnap.auraT))
+            Msg("Sugestoes mostradas no ultimo combate: " .. combatSnap.shown)
+        else
+            Msg("Entre em combate uma vez e rode /mvat diag de novo.")
+        end
+        Msg("Ultimo erro capturado: " .. (lastError and tostring(lastError) or "nenhum"))
     else
-        Msg("Comandos: lock | unlock | scale <0.5-3> | aoe <n> | combat | text | test | reset | on | off | debug")
+        Msg("Comandos: lock | unlock | scale <0.5-3> | aoe <n> | combat | text | test | reset | on | off | debug | diag")
     end
 end
 

@@ -66,6 +66,7 @@ mobs estão em combate e ativar as sugestões de área/farm.
 | `/mvat reset` | Restaura posição e opções padrão |
 | `/mvat on` / `/mvat off` | Ativa / desativa o addon |
 | `/mvat debug` | Mostra classe, n. de regras e habilidades reconhecidas |
+| `/mvat diag` | Mostra o que o jogo escondeu no último combate (vida, recurso, auras) e o último erro capturado |
 
 ## Como ler o HUD
 
@@ -74,6 +75,19 @@ mobs estão em combate e ativar as sugestões de área/farm.
 - **Texto grande no canto do ícone**: sua tecla de atalho (ex.: `E`, `Shift+2`, `F1`).
   Se estiver vazio, a habilidade não está em nenhuma barra com atalho.
 - **Texto abaixo**: o motivo da sugestão e o nome da habilidade.
+
+## WoW Forever: valores secretos
+
+O Forever usa o motor moderno do WoW, que esconde de addons várias informações durante o combate
+("valores secretos": vida, recursos, auras, recargas…) e proíbe o log de combate. O MVAT:
+
+- **não usa** o log de combate (evita o aviso "só disponível para a interface da Blizzard");
+- checa cada valor antes de usar: o que vier secreto é tratado como "desconhecido" e a regra que
+  dependia dele simplesmente não dispara — sem erros de Lua;
+- regras do tipo "buff/DoT ausente" só aparecem quando o addon tem **certeza** de que ele está ausente.
+
+Por isso, em combate, as sugestões podem ser bem menos frequentes que fora dele. Use `/mvat diag`
+depois de uma luta para ver o que o jogo liberou.
 
 ## Limitações conhecidas
 
