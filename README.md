@@ -62,6 +62,7 @@ mobs estão em combate e ativar as sugestões de área/farm.
 | `/mvat aoe 3` | Quantos inimigos ativam o modo área/farm (2 a 10) |
 | `/mvat combat` | Liga/desliga "mostrar só em combate" |
 | `/mvat text` | Liga/desliga o texto explicativo abaixo do ícone |
+| `/mvat roll` | Liga/desliga o aviso sonoro (e o item no chat) quando abre a janela de Necessidade/Ganância/Passar |
 | `/mvat test` | Mostra um ícone de teste por 5 segundos |
 | `/mvat reset` | Restaura posição e opções padrão |
 | `/mvat on` / `/mvat off` | Ativa / desativa o addon |
