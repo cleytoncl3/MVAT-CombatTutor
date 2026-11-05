@@ -73,12 +73,16 @@ local function SpellInfo(id)
     return Pub(name), Pub(icon)
 end
 
--- Recarga desconhecida (secreta) e tratada como pronta: o jogo ainda impede o
--- uso, e o addon prefere sugerir a ficar mudo.
+-- Recarga. Em combate o Forever esconde inicio/duracao, mas "isActive" e
+-- "isOnGCD" continuam LIMPOS (mesma leitura que o EllesmereUI usa no FocusKick).
+-- Retorna start, duration, active, onGCD (active/onGCD = nil quando desconhecidos).
+-- Recarga totalmente desconhecida conta como pronta: o jogo ainda impede o uso.
 local function SpellCooldown(spell)
     if C_Spell and C_Spell.GetSpellCooldown then
         local cd = C_Spell.GetSpellCooldown(spell)
-        if cd then return Pub(cd.startTime) or 0, Pub(cd.duration) or 0 end
+        if cd then
+            return Pub(cd.startTime) or 0, Pub(cd.duration) or 0, Pub(cd.isActive), Pub(cd.isOnGCD)
+        end
         return 0, 0
     end
     local start, duration = GetSpellCooldown(spell)
@@ -302,11 +306,22 @@ local function Ready(key, unit)
     local usable = SpellUsable(name)
     if usable == false then return false end
     if usable == nil and REACTIVE[key] then return false end
-    local start, duration = SpellCooldown(name)
+    local start, duration, active, onGCD = SpellCooldown(name)
+    if active == true and onGCD ~= true then return false end  -- em recarga (limpo)
     if start > 0 and duration > 1.6 and (start + duration - GetTime()) > 0.25 then return false end
     if unit and unit ~= "player" and UnitExists(unit) and SpellInRange(name, unit) == false then
         return false
     end
+    return true
+end
+
+-- So a recarga (sem exigir "usavel"/alcance): usada pelos alertas de cast.
+local function OffCooldown(key)
+    local name = N[key]
+    if not name or not known[name] then return false end
+    local start, duration, active, onGCD = SpellCooldown(name)
+    if active == true and onGCD ~= true then return false end
+    if start > 0 and duration > 1.6 and (start + duration - GetTime()) > 0.25 then return false end
     return true
 end
 
@@ -477,6 +492,7 @@ local function ReadTargetCast()
     cast.name = Pub(name) or "feitico do inimigo"
     endMS = Pub(endMS)
     cast.remaining = endMS and (endMS / 1000 - GetTime()) or 1
+    cast.unknownInt = issecret(notInt)   -- se secreto, o painel de cast decide so pela transparencia
     notInt = Pub(notInt)
     cast.interruptible = not notInt
     cast.onGroup = UnitInMyGroup("targettarget")
@@ -658,7 +674,7 @@ end
 -- Interrupcao: alvo hostil castando algo interrompivel
 local function Interrupt(pick)
     return R("INTERRUPT", pick, function(c)
-        return c.cast and c.cast.interruptible and c.cast.remaining > 0.15
+        return c.cast and c.cast.interruptible and not c.cast.unknownInt and c.cast.remaining > 0.15
     end, function(c) return "Interrompa: " .. c.cast.name end, "target")
 end
 
@@ -756,7 +772,7 @@ CLASS_RULES.ROGUE = function()
         Emergency("EVASION", 50, function(c) return c.threat >= 2 or not c.grouped end, "Apanhando: Evasao"),
         Interrupt("KICK"),
         Interrupt("GOUGE"),
-        Hit("INTERRUPT", "KIDNEY", function(c) return c.cast and c.cp >= 1 end, "Sem Chute: Golpe nos Rins"),
+        Hit("INTERRUPT", "KIDNEY", function(c) return c.cast and not c.cast.unknownInt and c.cp >= 1 end, "Sem Chute: Golpe nos Rins"),
         R("AOE", "BLADE_FLURRY", function(c) return c.inCombat and c.near >= 2 end, "Varios mobs: Rajada de Laminas"),
         Hit("COMBO", "RIPOSTE", nil, "Aparou! Ripostar"),
         Hit("COMBO", "SND", function(c) return c.cp >= 2 and Lacks("SND") and c.thp > 25 end,
@@ -859,7 +875,7 @@ CLASS_RULES.HUNTER = function()
         R("EMERGENCY", "FEIGN", function(c) return c.inCombat and c.grouped and c.threat >= 2 and c.hp < 60 end, "Aggro em voce: Fingir de Morto"),
         Emergency("DETERRENCE", 35, function(c) return c.melee end, "Apanhando corpo a corpo: Dissuasao"),
         R("HEAL", "MEND_PET", function(c) return c.inCombat and c.petHp < 40 end, "Pet morrendo: Curar Ajudante", "pet"),
-        Hit("INTERRUPT", "SCATTER", function(c) return c.cast and c.cast.interruptible end, function(c) return "Interrompa: " .. c.cast.name end),
+        Hit("INTERRUPT", "SCATTER", function(c) return c.cast and c.cast.interruptible and not c.cast.unknownInt end, function(c) return "Interrompa: " .. c.cast.name end),
         R("BUFF", "HAWK", function(c) return c.hostile and not c.melee and Lacks("HAWK") end, "Combate a distancia: Aspecto do Falcao", "player"),
         Hit("COMBO", "MONGOOSE", function(c) return c.melee end, "Alvo esquivou: Mordida do Mangusto"),
         Hit("ROTATION", "WING_CLIP", function(c) return c.melee and NotOnTarget("WING_CLIP") and not c.grouped end, "Colado: Cortar Asas e afaste-se"),
@@ -1025,17 +1041,97 @@ end
 local PROC_RULE = { cat = "COMBO", pick = {}, proc = true,
     msg = "Proc ativo! A Blizzard destacou esta habilidade" }
 
+-- COMBOS PELA SUA ULTIMA SKILL. Os seus proprios casts continuam legiveis em
+-- combate (UNIT_SPELLCAST_SUCCEEDED do "player"), entao "usei A -> use B" funciona
+-- mesmo com auras e buffs escondidos. { de, para, janela(s), mensagem, unidade }
+local lastCast = { key = nil, t = 0 }
+local castSeen, castReadable = 0, 0
+local nameToKey
+
+local SEQUENCES = {
+    MAGE = {
+        { "PRESENCE_OF_MIND", "PYROBLAST", 15, "Presenca da Mente usada: Piroblasto!", "target" },
+        { "FROST_NOVA", "ARCANE_EXPLOSION", 6, "Nova Congelante usada: Explosao Arcana" },
+        { "COMBUSTION", { "FIREBALL", "SCORCH" }, 30, "Combustao ativa: continue com fogo", "target" },
+    },
+    WARRIOR = {
+        { "SWEEPING", "WHIRLWIND", 10, "Golpes Amplos usados: Redemoinho", "target" },
+        { "THUNDER_CLAP", "DEMO_SHOUT", 5, "Trovoada usada: Grito Desmoralizante" },
+    },
+    ROGUE = {
+        { "GOUGE", "SINISTER", 5, "Inimigo atordoado: ataque seguro", "target" },
+        { "VANISH", "SINISTER", 8, "Furtivo: abra com Golpe Sinistro", "target" },
+    },
+    PRIEST = {
+        { "INNER_FOCUS", { "GREATER_HEAL", "HEAL" }, 10, "Foco Interior usado: cura grande gratis" },
+        { "PW_SHIELD", "RENEW", 6, "Escudo usado: Renovar" },
+    },
+    PALADIN = {
+        { { "SOC", "SOR", "SOTC", "SOL", "SOW", "SOJ" }, "JUDGEMENT", 28, "Selo usado: Julgamento!", "target" },
+    },
+    HUNTER = {
+        { "MARK", "SERPENT", 8, "Marca usada: Picada da Serpente", "target" },
+        { "SERPENT", "ARCANE_SHOT", 6, "Picada usada: Tiro Arcano", "target" },
+    },
+    WARLOCK = {
+        { { "COA", "COE", "COW", "COR", "COS", "COT" }, "CORRUPTION", 10, "Maldicao usada: Corrupcao", "target" },
+        { "CORRUPTION", "IMMOLATE", 10, "Corrupcao usada: Imolar", "target" },
+        { "IMMOLATE", "SHADOW_BOLT", 10, "Imolar usado: Seta Sombria", "target" },
+    },
+    SHAMAN = {
+        { "ELEM_MASTERY", { "CHAIN_LIGHTNING", "LIGHTNING_BOLT" }, 15, "Dominio Elemental: raio forte", "target" },
+        { "NS_SHAMAN", "HEALING_WAVE", 10, "Rapidez da Natureza: Onda Curativa instantanea" },
+    },
+    DRUID = {
+        { "NS_DRUID", "HEALING_TOUCH", 10, "Rapidez da Natureza: Toque de Cura instantaneo" },
+        { "FAERIE_FIRE", "MOONFIRE", 8, "Fogo Feerico usado: Fogo Lunar", "target" },
+        { "MOONFIRE", "INSECT_SWARM", 8, "Fogo Lunar usado: Enxame de Insetos", "target" },
+        { "INSECT_SWARM", "STARFIRE", 10, "Enxame usado: Fogo Estelar", "target" },
+    },
+}
+
+local function AfterRule(def)
+    local from, to, window, msg, unit = def[1], def[2], def[3], def[4], def[5]
+    local set = {}
+    for _, k in ipairs(type(from) == "table" and from or { from }) do set[k] = true end
+    return R("COMBO", to, function()
+        return lastCast.key and set[lastCast.key] and (GetTime() - lastCast.t) <= window
+    end, msg, unit)
+end
+
+local function OnPlayerCast(sid)
+    castSeen = castSeen + 1
+    sid = Pub(sid)
+    if type(sid) ~= "number" then return end
+    castReadable = castReadable + 1
+    local name = SpellInfo(sid)
+    if not name then return end
+    if not nameToKey then
+        nameToKey = {}
+        for key, n in pairs(N) do
+            if not key:find("^PROC_") then nameToKey[n] = key end
+        end
+    end
+    local key = nameToKey[name]
+    if key then lastCast.key, lastCast.t = key, GetTime() end
+end
+
 local function LoadClassRules()
     local _, class = UnitClass("player")
     playerClass = class
     local builder = CLASS_RULES[class]
     rules = builder and builder() or {}
-    -- procs entram antes de combos/rotacao (depois de emergencia/interrupt/cura)
+    nameToKey = nil
+    -- procs e combos por sequencia entram antes de combos/rotacao
+    -- (depois de emergencia/interrupt/cura)
     local at = #rules + 1
     for i, rule in ipairs(rules) do
         if rule.cat == "COMBO" or rule.cat == "AOE" or rule.cat == "ROTATION" or rule.cat == "BUFF" then at = i; break end
     end
     table.insert(rules, at, PROC_RULE)
+    for i, def in ipairs(SEQUENCES[class] or {}) do
+        table.insert(rules, at + i, AfterRule(def))
+    end
 end
 
 local function ResolveUnit(rule)
@@ -1124,9 +1220,214 @@ local function ApplyLayout()
     hud:ClearAllPoints()
     hud:SetPoint(DB.point, UIParent, DB.relPoint, DB.x, DB.y)
     hud:SetScale(DB.scale)
+    for _, f in ipairs(hud.panels or {}) do f:SetScale(DB.scale) end
     hud:EnableMouse(not DB.locked)          -- travado = clique atravessa o HUD
     hud.mover:SetShown(not DB.locked)
     hud.reason:SetShown(DB.showText)
+end
+
+---------------------------------------------------------------------------
+-- 9b. PAINEL DE CAST (funciona mesmo com tudo "secreto" em combate)
+---------------------------------------------------------------------------
+-- O Forever deixa addons MOSTRAR valores secretos (SetTexture, SetText) e
+-- controlar a transparencia por um booleano secreto (SetAlphaFromBoolean), mas
+-- nao deixa COMPARAR nem decidir com eles. E exatamente assim que o cast bar e o
+-- aviso de interrupcao do EllesmereUI funcionam. O painel faz o mesmo:
+--   * icone + nome do cast do inimigo  -> SetTexture/SetText (valores secretos)
+--   * icone de INTERROMPER             -> transparencia = "cast e interrompivel?"
+--   * icone de DEFESA                  -> transparencia = "cast e em mim E nao interrompivel?"
+-- O que o codigo decide com dados LIMPOS: o cast existe (type(...) ~= "nil"), a
+-- sua habilidade existe e esta fora de recarga (isActive).
+-- Filhos de UIParent (nao do HUD): continuam visiveis mesmo se o icone principal estiver oculto.
+hud.panels = {}
+local cast = CreateFrame("Frame", "MVAT_CastPanel", UIParent)
+cast:SetSize(1, 1)
+cast:SetFrameStrata("HIGH")
+cast:SetPoint("BOTTOM", hud, "TOP", 0, 26)
+cast:Hide()
+hud.panels[#hud.panels + 1] = cast
+
+local function MakeSlot(size)
+    local f = CreateFrame("Frame", nil, cast)
+    f:SetSize(size, size)
+    f.border = f:CreateTexture(nil, "BACKGROUND")
+    f.border:SetPoint("TOPLEFT", -2, 2); f.border:SetPoint("BOTTOMRIGHT", 2, -2)
+    f.icon = f:CreateTexture(nil, "ARTWORK")
+    f.icon:SetAllPoints(); f.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    f.key = f:CreateFontString(nil, "OVERLAY")
+    f.key:SetFont(STANDARD_TEXT_FONT, 13, "THICKOUTLINE")
+    f.key:SetPoint("BOTTOMRIGHT", -1, 2)
+    f.title = f:CreateFontString(nil, "OVERLAY")
+    f.title:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE")
+    f.title:SetPoint("BOTTOM", f, "TOP", 0, 3)
+    return f
+end
+
+cast.enemy = MakeSlot(34)    -- o que o inimigo esta castando
+cast.enemy:SetPoint("LEFT", cast, "CENTER", 4, 0)
+cast.enemy.border:SetColorTexture(1, 0.3, 0.1, 0.9)
+cast.enemy.title:SetText("INIMIGO"); cast.enemy.title:SetTextColor(1, 0.4, 0.2)
+cast.name = cast:CreateFontString(nil, "OVERLAY")
+cast.name:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
+cast.name:SetPoint("LEFT", cast.enemy, "RIGHT", 6, 0)
+cast.name:SetWidth(150); cast.name:SetJustifyH("LEFT")
+
+cast.kick = MakeSlot(34)     -- interromper
+cast.kick:SetPoint("RIGHT", cast, "CENTER", -4, 0)
+cast.kick.border:SetColorTexture(1, 0.55, 0, 0.95)
+cast.kick.title:SetText("INTERROMPER"); cast.kick.title:SetTextColor(1, 0.6, 0)
+
+cast.def = MakeSlot(34)      -- defesa
+cast.def:SetPoint("RIGHT", cast.kick, "LEFT", -10, 0)
+cast.def.border:SetColorTexture(0.9, 0.3, 0.9, 0.95)
+cast.def.title:SetText("DEFESA"); cast.def.title:SetTextColor(0.95, 0.5, 0.95)
+
+-- Habilidades de interrupcao e de defesa por classe (primeira conhecida e fora de recarga)
+local KICKS = {
+    WARRIOR = { "PUMMEL", "SHIELD_BASH" }, ROGUE = { "KICK" }, MAGE = { "COUNTERSPELL" },
+    PRIEST = { "SILENCE" }, PALADIN = { "HOJ" }, HUNTER = { "SCATTER" },
+    WARLOCK = { "DEATH_COIL" }, SHAMAN = { "EARTH_SHOCK" }, DRUID = { "BASH" },
+}
+local DEFENSES = {
+    WARRIOR = { "SHIELD_BLOCK", "SHIELD_WALL" }, ROGUE = { "EVASION" }, MAGE = { "ICE_BLOCK", "ICE_BARRIER", "MANA_SHIELD" },
+    PRIEST = { "PW_SHIELD", "FADE" }, PALADIN = { "DIVINE_PROT", "DIVINE_SHIELD" }, HUNTER = { "DETERRENCE" },
+    WARLOCK = { "DEATH_COIL" }, SHAMAN = { "GROUNDING" }, DRUID = { "BARKSKIN" },
+}
+
+local function FirstReady(list)
+    for _, k in ipairs(list or {}) do
+        if Known(k) and OffCooldown(k) then return k end
+    end
+end
+
+local function SetAlphaFromBool(frame, bool, whenTrue, whenFalse)
+    -- bool pode ser SECRETO: so a API nativa o le (nunca comparamos)
+    local ev = C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean
+    if ev then
+        local ok = pcall(function() frame:SetAlpha(ev(bool, whenTrue, whenFalse)) end)
+        if ok then return end
+    end
+    if frame.SetAlphaFromBoolean and pcall(frame.SetAlphaFromBoolean, frame, bool, whenTrue, whenFalse) then
+        return
+    end
+    frame:SetAlpha(1)   -- sem API: mostra sempre (melhor avisar a mais do que nada)
+end
+
+local castState = { active = false, started = 0, count = 0, readable = nil, nameReadable = nil, last = {} }
+local encState = { warning = 0, timeline = 0, valid = false, validTimeline = false }
+
+-- Le o cast do unit. type(x) funciona mesmo com valor secreto.
+local function ReadCast(unit)
+    local name, _, tex, _, _, _, castID, notInt, sid = UnitCastingInfo(unit)
+    if type(name) == "nil" then
+        name, _, tex, _, _, _, notInt, sid = UnitChannelInfo(unit)
+        castID = nil
+    end
+    if type(name) == "nil" then return nil end
+    return name, tex, notInt, sid
+end
+
+local function HideCastPanel()
+    if castState.active then castState.active = false end
+    cast:Hide()
+end
+
+-- Chamado a cada ciclo de atualizacao (barato): maquina de estados sobre
+-- "existe um cast no alvo?", que e um dado limpo.
+local function CastTick()
+    local unit = "target"
+    if not UnitExists(unit) or UnitIsDeadOrGhost("player") then HideCastPanel(); return end
+    local friendly = _G.UnitCanAttack("player", unit)
+    if not issecret(friendly) and not friendly then HideCastPanel(); return end  -- aliado castando: ignora
+    local name, tex, notInt, sid = ReadCast(unit)
+    if name == nil then HideCastPanel(); return end
+
+    -- primeiro quadro desse cast: pinta e mede o que esta legivel
+    local fresh = not castState.active
+    castState.active = true
+    if fresh then
+        castState.count = castState.count + 1
+        castState.started = GetTime()
+        castState.nameReadable = not issecret(name)
+        castState.intReadable = not issecret(notInt)
+        castState.meReadable = PlayerIsSpellTarget ~= nil and not issecret(PlayerIsSpellTarget(unit))
+    end
+
+    pcall(cast.enemy.icon.SetTexture, cast.enemy.icon, tex)        -- aceita valor secreto
+    pcall(cast.name.SetText, cast.name, name)                       -- aceita valor secreto
+
+    -- INTERROMPER: so se eu tenho a habilidade e ela esta fora de recarga (limpo);
+    -- a transparencia segue "e interrompivel?" (secreto).
+    local kickKey = FirstReady(KICKS[playerClass])
+    if kickKey then
+        cast.kick.icon:SetTexture(ICON[kickKey] or 134400)
+        cast.kick.key:SetText(GetKeybind(kickKey))
+        cast.kick:Show()
+        SetAlphaFromBool(cast.kick, notInt, 0, 1)                   -- notInt=true -> some
+    else
+        cast.kick:Hide()
+    end
+
+    -- DEFESA: so se o cast e EM MIM e NAO e interrompivel (ambos secretos).
+    local defKey = FirstReady(DEFENSES[playerClass])
+    local atMe = PlayerIsSpellTarget and PlayerIsSpellTarget(unit)
+    if defKey and type(atMe) ~= "nil" then
+        cast.def.icon:SetTexture(ICON[defKey] or 134400)
+        cast.def.key:SetText(GetKeybind(defKey))
+        cast.def:Show()
+        local ev = C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean
+        local ok = ev and pcall(function() cast.def:SetAlpha(ev(atMe, ev(notInt, 1, 0), 0)) end)
+        if not ok then SetAlphaFromBool(cast.def, atMe, 1, 0) end
+    else
+        cast.def:Hide()
+    end
+
+    cast:Show()
+end
+
+---------------------------------------------------------------------------
+-- 9c. AVISO DE ENCONTRO (ENCOUNTER_WARNING) - so se o cliente enviar
+---------------------------------------------------------------------------
+-- E o sistema que o DBM/BigWigs usam em Midnight: texto, icone e severidade do
+-- aviso do chefe. Texto/icone sao secretos (so exibimos); severidade e duracao
+-- sao limpas. No Forever o DBM nao liga esses eventos; aqui ligamos se existirem.
+local banner = CreateFrame("Frame", "MVAT_Banner", UIParent)
+banner:SetSize(1, 1)
+banner:SetFrameStrata("HIGH")
+banner:SetPoint("TOP", hud, "BOTTOM", 0, -44)
+banner:Hide()
+hud.panels[#hud.panels + 1] = banner
+banner.icon = banner:CreateTexture(nil, "ARTWORK")
+banner.icon:SetSize(30, 30); banner.icon:SetPoint("RIGHT", banner, "CENTER", -4, 0)
+banner.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+banner.text = banner:CreateFontString(nil, "OVERLAY")
+banner.text:SetFont(STANDARD_TEXT_FONT, 14, "THICKOUTLINE")
+banner.text:SetPoint("LEFT", banner, "CENTER", 2, 0)
+banner.text:SetWidth(240); banner.text:SetJustifyH("LEFT")
+local bannerUntil = 0
+
+local SEV_COLOR = { [0] = { 1, 1, 0.4 }, [1] = { 1, 0.6, 0.1 }, [2] = { 1, 0.15, 0.15 } }
+
+local function ShowEncounterWarning(info)
+    if type(info) ~= "table" then return end
+    encState.warning = encState.warning + 1
+    local sev = info.severity
+    if issecret(sev) or type(sev) ~= "number" then sev = 1 end
+    local col = SEV_COLOR[sev] or SEV_COLOR[1]
+    local text = info.text
+    -- o texto do aviso pode ter %s para o conjurador/alvo; formatar tambem aceita secretos
+    local ok, formatted = pcall(string.format, text, info.casterName or "", info.targetName or "")
+    pcall(banner.text.SetText, banner.text, ok and formatted or text)
+    banner.text:SetTextColor(col[1], col[2], col[3])
+    pcall(banner.icon.SetTexture, banner.icon, info.iconFileID)
+    local dur = info.duration
+    if issecret(dur) or type(dur) ~= "number" or dur <= 0 or dur > 15 then dur = 4 end
+    bannerUntil = GetTime() + dur
+    banner:Show()
+end
+
+local function BannerTick()
+    if banner:IsShown() and GetTime() > bannerUntil then banner:Hide() end
 end
 
 local current -- chave exibida no momento
@@ -1186,7 +1487,12 @@ local function DoUpdate()
         if combatSnap.usable == nil then
             for _, rule in ipairs(rules) do
                 local k = rule.pick[1]
-                if k and Known(k) then combatSnap.usable = SpellUsable(N[k]) ~= nil; break end
+                if k and Known(k) then
+                    combatSnap.usable = SpellUsable(N[k]) ~= nil
+                    local _, _, act = SpellCooldown(N[k])
+                    combatSnap.cd = act ~= nil
+                    break
+                end
             end
         end
     else
@@ -1206,13 +1512,17 @@ end
 -- esconde o icone neste ciclo em vez de gerar erro de Lua a cada 0,1s.
 local lastError
 local function Update()
-    if not DB or not DB.enabled then hud:Hide(); return end
+    if not DB or not DB.enabled then hud:Hide(); cast:Hide(); banner:Hide(); return end
     if GetTime() < testUntil then return end
     local ok, err = pcall(DoUpdate)
     if not ok then
         lastError = err
         hud:Hide()
     end
+    -- painel de cast e aviso de encontro sao independentes: um erro num nao derruba o outro
+    local ok2, err2 = pcall(CastTick)
+    if not ok2 then lastError = err2; cast:Hide() end
+    BannerTick()
 end
 
 ---------------------------------------------------------------------------
@@ -1240,7 +1550,13 @@ end
 
 core:RegisterEvent("ADDON_LOADED")
 core:RegisterEvent("PLAYER_LOGIN")
-core:SetScript("OnEvent", function(_, event, arg1)
+local function EventValid(e)
+    if not (C_EventUtils and C_EventUtils.IsEventValid) then return true end
+    local ok, v = pcall(C_EventUtils.IsEventValid, e)
+    return (not ok) or v == true
+end
+
+core:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     if event == "ADDON_LOADED" then
         if arg1 ~= ADDON_NAME then return end
         MVAT_DB = MVAT_DB or {}
@@ -1259,11 +1575,17 @@ core:SetScript("OnEvent", function(_, event, arg1)
             end
         end
         -- casts apenas do alvo atual (reacao instantanea a interrupts)
-        for _, e in ipairs({ "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_CHANNEL_START" }) do
-            if not C_EventUtils or not C_EventUtils.IsEventValid or C_EventUtils.IsEventValid(e) then
-                core:RegisterUnitEvent(e, "target")
-            end
+        for _, e in ipairs({ "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_STOP",
+                             "UNIT_SPELLCAST_CHANNEL_STOP", "UNIT_SPELLCAST_INTERRUPTED" }) do
+            if EventValid(e) then core:RegisterUnitEvent(e, "target") end
         end
+        -- os SEUS casts (alimentam os combos "usei A -> use B")
+        if EventValid("UNIT_SPELLCAST_SUCCEEDED") then core:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player") end
+        -- sistema de encontro da Blizzard (aviso do chefe): so se o cliente o enviar
+        encState.valid = EventValid("ENCOUNTER_WARNING")
+        encState.validTimeline = EventValid("ENCOUNTER_TIMELINE_EVENT_ADDED")
+        if encState.valid then pcall(core.RegisterEvent, core, "ENCOUNTER_WARNING") end
+        if encState.validTimeline then pcall(core.RegisterEvent, core, "ENCOUNTER_TIMELINE_EVENT_ADDED") end
         -- brilho de proc da Blizzard
         for _, e in ipairs({ "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW", "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" }) do
             if not C_EventUtils or not C_EventUtils.IsEventValid or C_EventUtils.IsEventValid(e) then
@@ -1289,8 +1611,17 @@ core:SetScript("OnEvent", function(_, event, arg1)
             end
         end
         elapsed = UPDATE_INTERVAL
-    elseif event == "PLAYER_TARGET_CHANGED"
-        or event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_CHANNEL_START" then
+    elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+        if arg1 == "player" then
+            OnPlayerCast(arg3)
+            elapsed = UPDATE_INTERVAL
+        end
+    elseif event == "ENCOUNTER_WARNING" then
+        local ok, err = pcall(ShowEncounterWarning, arg1)
+        if not ok then lastError = err end
+    elseif event == "ENCOUNTER_TIMELINE_EVENT_ADDED" then
+        encState.timeline = encState.timeline + 1
+    elseif event == "PLAYER_TARGET_CHANGED" or event:find("^UNIT_SPELLCAST_") then
         elapsed = UPDATE_INTERVAL -- reavalia imediatamente
     end
 end)
@@ -1356,11 +1687,24 @@ local function Slash(input)
             Msg("Alvo inimigo " .. known3(combatSnap.target) .. " | habilidade usavel " .. known3(combatSnap.usable)
                 .. " | cast do alvo detectado: " .. (combatSnap.casts > 0 and "sim" or "nao")
                 .. (combatSnap.casts > 0 and (" (nome " .. yn(combatSnap.castSecret) .. ")") or ""))
-            Msg("Procs (brilho da Blizzard) no ultimo combate: " .. procSeen
+            Msg("Recarga (isActive) " .. known3(combatSnap.cd)
+                .. " | procs (brilho da Blizzard): " .. procSeen
                 .. " | sugestoes mostradas: " .. combatSnap.shown)
         else
             Msg("Entre em combate uma vez e rode /mvat diag de novo.")
         end
+        if castState.count > 0 then
+            Msg("Painel de cast: " .. castState.count .. " casts vistos | nome " .. yn(not castState.nameReadable)
+                .. " | interrompivel " .. yn(not castState.intReadable)
+                .. " | cast em voce " .. yn(not castState.meReadable))
+        else
+            Msg("Painel de cast: nenhum cast de inimigo visto (teste com um mob que lance feitico)")
+        end
+        Msg("Seus casts: " .. castSeen .. " eventos, " .. castReadable .. " legiveis | combos por sequencia "
+            .. (castReadable > 0 and "|cff55ff55ATIVOS|r" or "|cffff5555sem dados|r"))
+        Msg("Encontro: ENCOUNTER_WARNING " .. (encState.valid and "existe" or "nao existe")
+            .. " (" .. encState.warning .. " recebidos) | timeline " .. (encState.validTimeline and "existe" or "nao existe")
+            .. " (" .. encState.timeline .. " eventos)")
         Msg("Ultimo erro capturado: " .. (lastError and tostring(lastError) or "nenhum"))
         lastError = nil -- o proximo diag mostra so erros novos
     else

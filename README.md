@@ -93,6 +93,33 @@ O Forever usa o motor moderno do WoW, que esconde de addons várias informaçõe
 Por isso, em combate, as sugestões podem ser bem menos frequentes que fora dele. Use `/mvat diag`
 depois de uma luta para ver o que o jogo liberou.
 
+### Painel de cast (o que o inimigo está castando)
+
+O jogo não deixa um addon **ler** o nome do feitiço do inimigo em combate, mas deixa **mostrá-lo**
+(`SetText`/`SetTexture` aceitam valor secreto) e controlar a transparência de um ícone por um
+booleano secreto (`SetAlphaFromBoolean`). É a mesma técnica da barra de cast do EllesmereUI. Quando o
+alvo castar, aparece um painel acima do ícone principal:
+
+- **INIMIGO**: ícone e nome do que ele está castando (exibidos, nunca comparados);
+- **INTERROMPER**: sua interrupção + tecla, só se ela existe e está fora de recarga (`isActive`);
+  o ícone some sozinho se o cast **não** for interrompível;
+- **DEFESA**: sua defesa + tecla, só aparece se o cast é **em você** e **não** é interrompível.
+
+Por isso o addon **não** sabe *qual* feitiço é, e não escolhe a skill pelo nome dele. Escolhe pelo
+*tipo* (interrompível, em você).
+
+### Combos pela sua última skill
+
+Os seus próprios casts continuam legíveis (`UNIT_SPELLCAST_SUCCEEDED` do jogador), então "usei A →
+use B" funciona sem auras: Presença da Mente → Piroblasto, Selo → Julgamento, Corrupção → Imolar →
+Seta Sombria, Marca → Picada → Tiro Arcano, Foco Interior → cura grande etc. Veja `SEQUENCES` em
+`MVAT.lua`.
+
+### Aviso do chefe
+
+Se o cliente enviar `ENCOUNTER_WARNING` (o sistema que o DBM/BigWigs usam em Midnight), o MVAT mostra
+o texto, o ícone e a severidade do aviso. `/mvat diag` informa se esse evento existe no seu cliente.
+
 ## Limitações conhecidas
 
 - Habilidades de **pet** (Bloqueio de Feitiço do Caçador de Vil, Intimidação) não são sugeridas.
