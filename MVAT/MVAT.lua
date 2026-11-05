@@ -290,10 +290,18 @@ end
 
 -- Pronto para uso: aprendido, usavel (mana/recurso/reativo/postura), fora de
 -- recarga (ignora o GCD) e no alcance da unidade, quando aplicavel.
+-- Habilidades reativas (so ficam disponiveis apos esquiva/aparo/alvo < 20%).
+-- Sem confirmacao de "usavel" elas nunca sao sugeridas pela regra comum; o
+-- brilho de proc da Blizzard continua sugerindo-as quando acendem.
+local REACTIVE = { EXECUTE = true, OVERPOWER = true, REVENGE = true, RIPOSTE = true,
+                   MONGOOSE = true, HOW = true }
+
 local function Ready(key, unit)
     local name = N[key]
     if not name or not known[name] then return false end
-    if SpellUsable(name) == false then return false end
+    local usable = SpellUsable(name)
+    if usable == false then return false end
+    if usable == nil and REACTIVE[key] then return false end
     local start, duration = SpellCooldown(name)
     if start > 0 and duration > 1.6 and (start + duration - GetTime()) > 0.25 then return false end
     if unit and unit ~= "player" and UnitExists(unit) and SpellInRange(name, unit) == false then
@@ -459,11 +467,12 @@ end
 -- sem a flag de interrupcao assume interrompivel (o jogo recusa se nao for).
 local function ReadTargetCast()
     if not c.hostile then return nil end
+    -- issecret antes de qualquer comparacao: comparar um valor secreto gera erro
     local name, _, _, _, endMS, _, _, notInt = UnitCastingInfo("target")
-    if name == nil then
+    if not issecret(name) and name == nil then
         name, _, _, _, endMS, _, notInt = UnitChannelInfo("target")
     end
-    if name == nil then return nil end
+    if not issecret(name) and name == nil then return nil end
     local cast = c.castData
     cast.name = Pub(name) or "feitico do inimigo"
     endMS = Pub(endMS)
@@ -526,7 +535,12 @@ local function BuildContext()
     c.grouped = Is(IsInGroup())
 
     c.target = UnitExists("target")
-    c.hostile = c.target and UnitCanAttack("player", "target") and not UnitIsDead("target")
+    -- Se o jogo esconder se o alvo e atacavel, em combate assumimos que o alvo
+    -- e o inimigo (o jogo recusa a habilidade se nao for).
+    local atk = _G.UnitCanAttack("player", "target")
+    c.hostileSecret = c.target and issecret(atk)
+    if c.hostileSecret then c.hostile = c.inCombat and not UnitIsDead("target")
+    else c.hostile = c.target and atk and not UnitIsDead("target") end
     c.thp = c.target and UnitPct("target") or 100
     local class = c.target and Pub(UnitClassification("target")) or "normal"
     c.elite = class == "elite" or class == "worldboss" or class == "rareelite"
@@ -544,11 +558,16 @@ local function BuildContext()
     CollectAuras("target", "HARMFUL", targetAny)
 
     c.castData = c.castData or {}
-    c.cast = ReadTargetCast()
-    c.enemies, c.near = CountEnemies()
+    -- isolados com pcall: se o jogo bloquear um deles, o resto (procs) segue funcionando
+    local okCast, cast = pcall(ReadTargetCast)
+    c.cast = okCast and cast or nil
+    local okEn, en, near = pcall(CountEnemies)
+    c.enemies, c.near = okEn and en or 0, okEn and near or 0
     c.aoe = c.enemies >= DB.aoe
     c.meleeAoe = c.near >= DB.aoe
 
+    if c.inCombat ~= c.prevCombat then lastGroupScan = 0 end -- rescan na entrada/saida de combate
+    c.prevCombat = c.inCombat
     if c.now - lastGroupScan > GROUP_SCAN_INTERVAL then
         lastGroupScan = c.now
         ScanGroup()
@@ -973,11 +992,50 @@ local CATEGORY = {
 local rules = {}
 local playerClass
 
+-- PROCS: o brilho que a propria Blizzard coloca numa habilidade (Sobrepujar,
+-- Executar, Revanche, procs de talento...). Os eventos SPELL_ACTIVATION_OVERLAY
+-- continuam liberados no Forever, entao esta e a fonte principal em combate.
+local glowing = {}   -- [spellID] = true enquanto a Blizzard destaca o feitico
+local procSeen = 0   -- procs recebidos no combate atual (para o diag)
+
+local function ProcKey(sid)
+    local key = "PROC_" .. sid
+    if not N[key] then
+        local name, icon = SpellInfo(sid)
+        if not name then return nil end
+        N[key], ICON[key] = name, icon
+    end
+    return key
+end
+
+local function GlowingProcKey()
+    local ISO = C_SpellActivationOverlay and C_SpellActivationOverlay.IsSpellOverlayed
+    for sid in pairs(glowing) do
+        local key = ProcKey(sid)
+        local still = true
+        if ISO then
+            local ok, on = pcall(ISO, sid)
+            if ok and not issecret(on) and not on then still = false end
+        end
+        if not still then glowing[sid] = nil
+        elseif key and Known(key) then return key end
+    end
+end
+
+local PROC_RULE = { cat = "COMBO", pick = {}, proc = true,
+    msg = "Proc ativo! A Blizzard destacou esta habilidade" }
+
 local function LoadClassRules()
     local _, class = UnitClass("player")
     playerClass = class
     local builder = CLASS_RULES[class]
     rules = builder and builder() or {}
+    -- procs entram antes de combos/rotacao (depois de emergencia/interrupt/cura)
+    local at = #rules + 1
+    for i, rule in ipairs(rules) do
+        if rule.cat == "COMBO" or rule.cat == "AOE" or rule.cat == "ROTATION" or rule.cat == "BUFF" then at = i; break end
+    end
+    table.insert(rules, at, PROC_RULE)
 end
 
 local function ResolveUnit(rule)
@@ -989,11 +1047,16 @@ end
 -- Retorna regra, chave escolhida e unidade da primeira sugestao valida.
 local function Evaluate()
     for _, rule in ipairs(rules) do
-        local unit = ResolveUnit(rule)
-        if (unit == nil and not rule.unit) or (unit and UnitExists(unit)) then
-            if not rule.when or rule.when(c, unit) then
-                for _, key in ipairs(rule.pick) do
-                    if Known(key) and Ready(key, unit) then return rule, key, unit end
+        if rule.proc then
+            local key = next(glowing) and GlowingProcKey()
+            if key and Ready(key) then return rule, key end
+        else
+            local unit = ResolveUnit(rule)
+            if (unit == nil and not rule.unit) or (unit and UnitExists(unit)) then
+                if not rule.when or rule.when(c, unit) then
+                    for _, key in ipairs(rule.pick) do
+                        if Known(key) and Ready(key, unit) then return rule, key, unit end
+                    end
                 end
             end
         end
@@ -1108,10 +1171,24 @@ local function DoUpdate()
     if c.inCombat then
         if not combatSnap.active then -- inicio de um novo combate
             combatSnap.active, combatSnap.seen, combatSnap.shown = true, true, 0
+            combatSnap.target, combatSnap.casts, combatSnap.castSecret = nil, 0, nil
+            combatSnap.usable = nil
+            procSeen = 0
         end
         combatSnap.hp = c.hpKnown
         combatSnap.power = Pub(UnitPower("player")) ~= nil
         combatSnap.auraP, combatSnap.auraT = auraSecret.player, auraSecret.target
+        if c.target then combatSnap.target = not c.hostileSecret end
+        if c.cast then
+            combatSnap.casts = combatSnap.casts + 1
+            combatSnap.castSecret = (c.cast.name == "feitico do inimigo")
+        end
+        if combatSnap.usable == nil then
+            for _, rule in ipairs(rules) do
+                local k = rule.pick[1]
+                if k and Known(k) then combatSnap.usable = SpellUsable(N[k]) ~= nil; break end
+            end
+        end
     else
         combatSnap.active = false
     end
@@ -1187,6 +1264,12 @@ core:SetScript("OnEvent", function(_, event, arg1)
                 core:RegisterUnitEvent(e, "target")
             end
         end
+        -- brilho de proc da Blizzard
+        for _, e in ipairs({ "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW", "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" }) do
+            if not C_EventUtils or not C_EventUtils.IsEventValid or C_EventUtils.IsEventValid(e) then
+                core:RegisterEvent(e)
+            end
+        end
         print("|cff33ccffMVAT|r carregado para " .. (UnitClass("player")) .. ". Digite |cffffff00/mvat|r para opcoes.")
     elseif event == "SPELLS_CHANGED" or event == "LEARNED_SPELL_IN_TAB" or event == "PLAYER_LEVEL_UP"
         or event == "CHARACTER_POINTS_CHANGED" then
@@ -1195,6 +1278,17 @@ core:SetScript("OnEvent", function(_, event, arg1)
     elseif event == "ACTIONBAR_SLOT_CHANGED" or event == "UPDATE_BINDINGS"
         or event == "UPDATE_SHAPESHIFT_FORM" or event == "UPDATE_BONUS_ACTIONBAR" then
         RebuildKeyCache()
+    elseif event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" or event == "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" then
+        local sid = Pub(arg1)
+        if type(sid) == "number" then
+            if event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" then
+                glowing[sid] = true
+                if UnitAffectingCombat("player") then procSeen = procSeen + 1 end
+            else
+                glowing[sid] = nil
+            end
+        end
+        elapsed = UPDATE_INTERVAL
     elseif event == "PLAYER_TARGET_CHANGED"
         or event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_CHANNEL_START" then
         elapsed = UPDATE_INTERVAL -- reavalia imediatamente
@@ -1258,7 +1352,12 @@ local function Slash(input)
         if combatSnap.seen then
             Msg("Ultimo combate: vida " .. yn(not combatSnap.hp) .. " | recurso " .. yn(not combatSnap.power)
                 .. " | auras proprias " .. yn(combatSnap.auraP) .. " | auras do alvo " .. yn(combatSnap.auraT))
-            Msg("Sugestoes mostradas no ultimo combate: " .. combatSnap.shown)
+            local function known3(v) if v == nil then return "nao medido" end return yn(not v) end
+            Msg("Alvo inimigo " .. known3(combatSnap.target) .. " | habilidade usavel " .. known3(combatSnap.usable)
+                .. " | cast do alvo detectado: " .. (combatSnap.casts > 0 and "sim" or "nao")
+                .. (combatSnap.casts > 0 and (" (nome " .. yn(combatSnap.castSecret) .. ")") or ""))
+            Msg("Procs (brilho da Blizzard) no ultimo combate: " .. procSeen
+                .. " | sugestoes mostradas: " .. combatSnap.shown)
         else
             Msg("Entre em combate uma vez e rode /mvat diag de novo.")
         end

@@ -84,7 +84,11 @@ O Forever usa o motor moderno do WoW, que esconde de addons várias informaçõe
 - **não usa** o log de combate (evita o aviso "só disponível para a interface da Blizzard");
 - checa cada valor antes de usar: o que vier secreto é tratado como "desconhecido" e a regra que
   dependia dele simplesmente não dispara — sem erros de Lua;
-- regras do tipo "buff/DoT ausente" só aparecem quando o addon tem **certeza** de que ele está ausente.
+- regras do tipo "buff/DoT ausente" só aparecem quando o addon tem **certeza** de que ele está ausente;
+- em combate, a fonte principal é o **brilho de proc da própria Blizzard**
+  (`SPELL_ACTIVATION_OVERLAY_GLOW_SHOW`): quando uma habilidade acende (Sobrepujar, Executar,
+  Revanche, procs de talento), o MVAT mostra o ícone dela com a sua tecla;
+- quando o alvo inicia um cast, o aviso de interromper aparece mesmo se o nome do feitiço estiver oculto.
 
 Por isso, em combate, as sugestões podem ser bem menos frequentes que fora dele. Use `/mvat diag`
 depois de uma luta para ver o que o jogo liberou.
