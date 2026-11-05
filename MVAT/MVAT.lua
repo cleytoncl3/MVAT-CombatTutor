@@ -30,7 +30,6 @@ local DEFAULTS = {
     combatOnly = false,  -- true = so mostra em combate
     aoe = 3,             -- n. de inimigos para considerar "area / farm"
     showText = true,     -- mostra o motivo da sugestao abaixo do icone
-    rollSound = true,    -- toca um aviso quando abre a janela de Necessidade/Ganancia/Passar
 }
 
 local DB -- preenchido no ADDON_LOADED
@@ -1587,8 +1586,6 @@ core:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         encState.validTimeline = EventValid("ENCOUNTER_TIMELINE_EVENT_ADDED")
         if encState.valid then pcall(core.RegisterEvent, core, "ENCOUNTER_WARNING") end
         if encState.validTimeline then pcall(core.RegisterEvent, core, "ENCOUNTER_TIMELINE_EVENT_ADDED") end
-        -- aviso sonoro de roll (Necessidade / Ganancia / Passar)
-        if EventValid("START_LOOT_ROLL") then pcall(core.RegisterEvent, core, "START_LOOT_ROLL") end
         -- brilho de proc da Blizzard
         for _, e in ipairs({ "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW", "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" }) do
             if not C_EventUtils or not C_EventUtils.IsEventValid or C_EventUtils.IsEventValid(e) then
@@ -1614,16 +1611,6 @@ core:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
             end
         end
         elapsed = UPDATE_INTERVAL
-    elseif event == "START_LOOT_ROLL" then
-        -- janela de Necessidade / Ganancia / Passar: toca o aviso e mostra o item no chat
-        if DB.rollSound then
-            local sk = _G.SOUNDKIT
-            pcall(PlaySound, (sk and (sk.READY_CHECK or sk.UI_BNET_TOAST)) or 8960, "Master")
-            local okLink, link = pcall(GetLootRollItemLink, arg1)
-            if okLink and type(link) == "string" then
-                print("|cff33ccffMVAT|r Roll aberto: " .. link .. " - escolha Necessidade, Ganancia ou Passar")
-            end
-        end
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
         if arg1 == "player" then
             OnPlayerCast(arg3)
@@ -1662,13 +1649,6 @@ local function Slash(input)
         else Msg("Use: /mvat aoe 3  (entre 2 e 10)") end
     elseif cmd == "combat" or cmd == "combate" then
         DB.combatOnly = not DB.combatOnly; Msg(DB.combatOnly and "Mostrando so em combate." or "Mostrando tambem fora de combate (buffs).")
-    elseif cmd == "roll" then
-        DB.rollSound = not DB.rollSound
-        Msg(DB.rollSound and "Aviso sonoro de roll LIGADO." or "Aviso sonoro de roll DESLIGADO.")
-        if DB.rollSound then
-            local sk = _G.SOUNDKIT
-            pcall(PlaySound, (sk and (sk.READY_CHECK or sk.UI_BNET_TOAST)) or 8960, "Master")
-        end
     elseif cmd == "text" or cmd == "texto" then
         DB.showText = not DB.showText; ApplyLayout(); Msg(DB.showText and "Texto de motivo ligado." or "Texto de motivo desligado.")
     elseif cmd == "reset" then
@@ -1728,7 +1708,7 @@ local function Slash(input)
         Msg("Ultimo erro capturado: " .. (lastError and tostring(lastError) or "nenhum"))
         lastError = nil -- o proximo diag mostra so erros novos
     else
-        Msg("Comandos: lock | unlock | scale <0.5-3> | aoe <n> | combat | text | roll | test | reset | on | off | debug | diag")
+        Msg("Comandos: lock | unlock | scale <0.5-3> | aoe <n> | combat | text | test | reset | on | off | debug | diag")
     end
 end
 
