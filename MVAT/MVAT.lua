@@ -103,26 +103,65 @@ local function SpellInRange(spell, unit)
     return r == true or r == 1
 end
 
+-- No Forever a leitura de auras por indice nao devolve um valor secreto: ela
+-- GERA ERRO ("Auras cannot be accessed when secret"). Antes de varrer auras,
+-- testamos com pcall (mesma tecnica do EllesmereUI). Resultado cacheado por frame.
+local restrictedStamp, restrictedValue = -1, false
+local function AurasRestricted()
+    local now = GetTime()
+    if now == restrictedStamp then return restrictedValue end
+    restrictedStamp = now
+    restrictedValue = false
+    if C_Secrets and C_Secrets.ShouldAurasBeSecret then
+        local ok, v = pcall(C_Secrets.ShouldAurasBeSecret)
+        if not ok or issecret(v) or v then restrictedValue = true; return true end
+    end
+    if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex
+        and not pcall(C_UnitAuras.GetAuraDataByIndex, "player", 1, "HELPFUL") then
+        restrictedValue = true
+    end
+    return restrictedValue
+end
+
 -- Itera auras de uma unidade: fn(name, dispelType, source, expiration, stacks)
 -- retornar true dentro de fn interrompe a iteracao. Auras secretas sao puladas.
+-- Retorna false quando as auras estao bloqueadas (nada foi lido).
 local function ForEachAura(unit, filter, fn)
+    if AurasRestricted() then return false end
     if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
         for i = 1, 40 do
-            local a = C_UnitAuras.GetAuraDataByIndex(unit, i, filter)
-            if not a or issecret(a) then return end
+            local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, filter)
+            if not ok then return false end
+            if not a or issecret(a) then return true end
             local name = Pub(a.name)
             if name and fn(name, Pub(a.dispelName), Pub(a.sourceUnit), Pub(a.expirationTime), Pub(a.applications)) then
-                return
+                return true
             end
         end
     else
         for i = 1, 40 do
-            local name, _, count, dtype, _, expiration, source = UnitAura(unit, i, filter)
-            if name == nil then return end
+            local ok, name, _, count, dtype, _, expiration, source = pcall(UnitAura, unit, i, filter)
+            if not ok then return false end
+            if name == nil then return true end
             name = Pub(name)
-            if name and fn(name, Pub(dtype), Pub(source), Pub(expiration), Pub(count)) then return end
+            if name and fn(name, Pub(dtype), Pub(source), Pub(expiration), Pub(count)) then return true end
         end
     end
+    return true
+end
+
+-- Consulta de UMA aura do jogador pelo Spell ID, permitida em combate quando o
+-- jogo libera aquele feitico (C_Secrets.ShouldSpellAuraBeSecret == false).
+-- true = ativa, false = ausente, nil = desconhecido.
+local function PlayerAuraByID(id)
+    if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then return nil end
+    if C_Secrets and C_Secrets.ShouldSpellAuraBeSecret then
+        local ok, secret = pcall(C_Secrets.ShouldSpellAuraBeSecret, id)
+        if not ok or issecret(secret) or secret ~= false then return nil end
+    end
+    local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
+    if not ok or issecret(aura) then return nil end
+    return aura ~= nil
 end
 
 -- Porcentagem de vida, ou nil quando a vida esta secreta
@@ -196,6 +235,20 @@ local ID = {
 
 local N, ICON = {}, {}   -- N[key] = nome localizado, ICON[key] = textura
 local known = {}         -- known[nomeLocalizado] = true
+local RANKID = {}        -- RANKID[key] = Spell ID do rank que o jogador aprendeu
+
+-- Pelo nome, o jogo devolve o maior rank aprendido (para consultar a aura certa)
+local function ResolveRankIDs()
+    wipe(RANKID)
+    if not (C_Spell and C_Spell.GetSpellInfo) then return end
+    for key, name in pairs(N) do
+        if known[name] then
+            local ok, info = pcall(C_Spell.GetSpellInfo, name)
+            local sid = ok and info and Pub(info.spellID)
+            if type(sid) == "number" then RANKID[key] = sid end
+        end
+    end
+end
 
 local function ResolveNames()
     for key, id in pairs(ID) do
@@ -351,33 +404,17 @@ local lastGroupScan = 0
 -- concluido. auraSecret[unit] = true faz as regras de "falta X" ficarem mudas.
 local auraSecret = {}
 
-local function AurasAreSecret()
-    if not (C_Secrets and C_Secrets.ShouldAurasBeSecret) then return false end
-    local ok, v = pcall(C_Secrets.ShouldAurasBeSecret)
-    if not ok or issecret(v) then return true end
-    return v and true or false
-end
-
 local function CollectAuras(unit, filter, store, mineOnly, tag)
     wipe(store)
     if not UnitExists(unit) then return end
-    local now, raw, seen = GetTime(), 0, 0
-    if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
-        -- conta auras existentes x auras legiveis para detectar ocultacao
-        for i = 1, 40 do
-            local a = C_UnitAuras.GetAuraDataByIndex(unit, i, filter)
-            if not a then break end
-            raw = raw + 1
-        end
-    end
-    ForEachAura(unit, filter, function(name, _, source, expiration)
-        seen = seen + 1
+    local now = GetTime()
+    local readable = ForEachAura(unit, filter, function(name, _, source, expiration)
         if not mineOnly or source == "player" or source == "pet" then
             local remain = (expiration and expiration > 0) and (expiration - now) or 999
             if not store[name] or store[name] < remain then store[name] = remain end
         end
     end)
-    if tag then auraSecret[tag] = (seen < raw) or (c.inCombat and AurasAreSecret()) end
+    if tag then auraSecret[tag] = not readable end
 end
 
 local function RefreshGroupUnits()
@@ -524,11 +561,21 @@ end
 -- Ajudantes de leitura de estado (por chave do ID).
 -- Buff/OnTarget = "tenho certeza que ESTA ativo".
 -- Lacks/NotOnTarget = "tenho certeza que NAO esta" (falso se as auras estao secretas).
-local function Buff(key) return N[key] and playerBuffs[N[key]] end
+-- Com as auras bloqueadas, os buffs do jogador ainda podem ser consultados um a
+-- um pelo Spell ID do rank que o jogador tem (quando o jogo libera aquele feitico).
+local function Buff(key)
+    if not N[key] then return false end
+    if auraSecret.player then return PlayerAuraByID(RANKID[key] or ID[key]) == true end
+    return playerBuffs[N[key]]
+end
 local function Debuff(key) return N[key] and playerDebuffs[N[key]] end
 local function OnTarget(key) return N[key] and targetMine[N[key]] end         -- debuff MEU no alvo
 local function OnTargetAny(key) return N[key] and targetAny[N[key]] end       -- debuff de qualquer um
-local function Lacks(key) return not auraSecret.player and not Buff(key) end
+local function Lacks(key)
+    if not N[key] then return false end
+    if auraSecret.player then return PlayerAuraByID(RANKID[key] or ID[key]) == false end
+    return not playerBuffs[N[key]]
+end
 local function NotOnTarget(key) return not auraSecret.target and not OnTarget(key) end
 local function NotOnTargetAny(key) return not auraSecret.target and not OnTargetAny(key) end
 local function AnyOnTarget(...) for i = 1, select("#", ...) do if OnTarget((select(i, ...))) then return true end end end
@@ -537,8 +584,11 @@ local function AnyOnTarget(...) for i = 1, select("#", ...) do if OnTarget((sele
 local function UnitHasAura(unit, key, filter)
     local name, found = N[key], false
     if not name then return false end
-    if c.inCombat and AurasAreSecret() then return nil end
-    ForEachAura(unit, filter, function(n) if n == name then found = true; return true end end)
+    local readable = ForEachAura(unit, filter, function(n) if n == name then found = true; return true end end)
+    if not readable then
+        if unit == "player" or UnitIsUnit(unit, "player") then return PlayerAuraByID(ID[key]) end
+        return nil
+    end
     return found
 end
 local function UnitLacksAura(unit, key, filter) return UnitHasAura(unit, key, filter) == false end
@@ -612,8 +662,8 @@ local function SelfBuff(pick, family, inCombatToo)
     family = family or (type(pick) == "table" and pick or { pick })
     return R("BUFF", pick, function(c)
         if c.inCombat and not inCombatToo then return false end
-        if auraSecret.player then return false end
-        for _, k in ipairs(family) do if Buff(k) then return false end end
+        -- so sugere com certeza de que NENHUM buff da familia esta ativo
+        for _, k in ipairs(family) do if not Lacks(k) then return false end end
         return true
     end, "Buff ausente", "player")
 end
@@ -1107,6 +1157,7 @@ end)
 local function RefreshSpells()
     ResolveNames()
     ScanSpellbook()
+    ResolveRankIDs()
     RebuildKeyCache()
 end
 
@@ -1202,7 +1253,8 @@ local function Slash(input)
         end
         local _, build, _, iface = GetBuildInfo()
         Msg("Diagnostico (build " .. tostring(build) .. ", interface " .. tostring(iface) .. ")")
-        Msg("Agora: auras=" .. should("ShouldAurasBeSecret") .. " recargas=" .. should("ShouldCooldownsBeSecret"))
+        Msg("Agora: auras=" .. should("ShouldAurasBeSecret") .. " recargas=" .. should("ShouldCooldownsBeSecret")
+            .. " | leitura de auras " .. yn(AurasRestricted()))
         if combatSnap.seen then
             Msg("Ultimo combate: vida " .. yn(not combatSnap.hp) .. " | recurso " .. yn(not combatSnap.power)
                 .. " | auras proprias " .. yn(combatSnap.auraP) .. " | auras do alvo " .. yn(combatSnap.auraT))
@@ -1211,6 +1263,7 @@ local function Slash(input)
             Msg("Entre em combate uma vez e rode /mvat diag de novo.")
         end
         Msg("Ultimo erro capturado: " .. (lastError and tostring(lastError) or "nenhum"))
+        lastError = nil -- o proximo diag mostra so erros novos
     else
         Msg("Comandos: lock | unlock | scale <0.5-3> | aoe <n> | combat | text | test | reset | on | off | debug | diag")
     end
