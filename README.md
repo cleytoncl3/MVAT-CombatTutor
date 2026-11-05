@@ -118,6 +118,31 @@ Forever (TalentsForeverBook / WhatsTraining):
 - O estado do selo é rastreado pelos seus próprios casts e pela duração real vista nas auras, porque em
   combate o Forever esconde as auras.
 
+### Outras classes (habilidades e regras do Forever)
+
+Os IDs e as habilidades novas vêm da lista de treinador do próprio Forever (WhatsTraining/Camelot) e das notas
+de mudanças (TalentsForeverBook). Cada classe usa o que existe no Forever:
+
+| Classe | Habilidades do Forever usadas |
+|---|---|
+| Guerreiro | Investida (abertura), Vitória Rápida, Golpe Poderoso (15 s), Ira Sangrenta no início da luta, Temeridade em elite, Trovoada |
+| Ladino | Abertura furtiva (Emboscada se tiver adaga; senão Golpe Baixo/Garrote), Esfaquear com adaga, Ruptura em elite |
+| Mago | Arcane Blast (especialização Arcana), Ice Lance após Nova Congelante, Onda Explosiva |
+| Sacerdote | Penance, Prayer of Mending, Shadow Word: Death (só com vida alta), Nova Sagrada |
+| Caçador | Tiro Mirado/Múltiplo (recarga compartilhada), Contra-ataque |
+| Bruxo | Bane da Agonia separado da Maldição, Dreno de Vida, Conflagrar, Fogo da Alma em elite |
+| Xamã | Fire Nova (agora uma magia de 10 s), Corrente de Raios |
+| Druida | Lacerar (urso), Pounce/Ravage (gato em Rondar) |
+
+Em combate o Forever esconde **auras do alvo, Raiva/Energia e pontos de combo**. Para continuar sugerindo:
+
+- **DoTs** (Dilacerar, Corrupção, Imolar, Fogo Lunar...) são rastreados pelo **tempo desde o seu último cast**
+  (zera ao trocar de alvo); com auras legíveis, vale a aura real.
+- **Pontos de combo** são contados pelos seus casts (cada gerador soma, cada finalizador zera).
+- **Raiva/Energia desconhecidas**: o addon assume que há recurso (o jogo recusa se faltar).
+- **Cura em combate** é limitada: a vida dos aliados é secreta, então curas por "vida baixa" só aparecem fora
+  de combate; Prayer of Mending e afins aparecem por recarga.
+
 ### Painel de cast (o que o inimigo está castando)
 
 O jogo não deixa um addon **ler** o nome do feitiço do inimigo em combate, mas deixa **mostrá-lo**

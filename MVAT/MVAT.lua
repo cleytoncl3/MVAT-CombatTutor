@@ -229,7 +229,7 @@ local ID = {
     HEALING_WAVE = 331, LHW = 8004, CHAIN_HEAL = 1064, LIGHTNING_SHIELD = 324,
     ROCKBITER = 8017, FLAMETONGUE = 8024, WINDFURY = 8232, STORMSTRIKE = 17364,
     SHAMAN_CLEARCAST = 16246, GROUNDING = 8177, SEARING = 3599, MAGMA = 8190,
-    FIRE_NOVA = 1535, NS_SHAMAN = 16188, ELEM_MASTERY = 16166,
+    NS_SHAMAN = 16188, ELEM_MASTERY = 16166,
     -- Druida
     BASH = 5211, FERAL_CHARGE = 16979, REMOVE_CURSE = 2782, CURE_POISON_D = 8946,
     ABOLISH_POISON = 2893, BARKSKIN = 22812, FRENZIED = 22842, MOONFIRE = 8921, WRATH = 5176,
@@ -238,11 +238,58 @@ local ID = {
     CLAW = 1082, RAKE = 1822, RIP = 1079, BITE = 22568, SHRED = 5221, MAUL = 6807,
     SWIPE = 779, DEMO_ROAR = 99, GROWL = 6795, HURRICANE = 16914, DRUID_CLEARCAST = 16870,
     TIGERS_FURY = 5217, FAERIE_FIRE = 770, FAERIE_FIRE_FERAL = 16857, NS_DRUID = 17116,
+    -- Habilidades novas/trocadas do Forever (IDs do treinador)
+    CHARGE = 100, VICTORY_RUSH = 402927, SLAM = 1464, BLOODRAGE = 2687, HAMSTRING = 1715, RECKLESSNESS = 1719,
+    RETALIATION = 20230, INTERCEPT = 20616, BACKSTAB = 53, AMBUSH = 8676, GARROTE = 703, CHEAP_SHOT = 1833,
+    RUPTURE = 1943, FEINT = 1966, MUTILATE = 1241582, ARCANE_BLAST = 1239696, ICE_LANCE = 400640,
+    FROSTFIRE = 401502, BLAST_WAVE = 13018, FLAMESTRIKE = 2120, PENANCE = 1240720, PRAYER_OF_MENDING = 1240826,
+    SW_DEATH = 1309595, HOLY_NOVA = 15430, BINDING_HEAL = 401937, PRAYER_OF_HEALING = 596,
+    DEVOURING_PLAGUE = 2944, COUNTERATTACK = 20909, CONFLAGRATE = 17962, SEARING_PAIN = 5676, SOUL_FIRE = 6353,
+    INCINERATE = 1293812, SIPHON_LIFE = 18879, FEAR = 5782, LACERATE = 414644, POUNCE = 9005, RAVAGE = 6785,
+    FIRE_NOVA = 408341,
 }
 
 -- IDs alternativos (todos os ranks do treinador do Forever) para achar a habilidade mesmo se o ID principal
 -- nao existir no cliente. Gerado a partir dos dados do WhatsTraining (Camelot) e do ForeverAuras.
 local ALT = {
+    CHARGE = {100, 6178, 11578},
+    VICTORY_RUSH = {402927},
+    SLAM = {1464, 8820, 11604, 11605, 1240193},
+    BLOODRAGE = {2687},
+    HAMSTRING = {1715, 7372, 7373},
+    RECKLESSNESS = {1719},
+    RETALIATION = {20230},
+    INTERCEPT = {20616, 20617},
+    BACKSTAB = {53, 2589, 2590, 2591, 8721, 11279, 11280, 11281},
+    AMBUSH = {8676, 8724, 8725, 11267, 11268, 11269},
+    GARROTE = {703, 8631, 8632, 8633, 11289, 11290},
+    CHEAP_SHOT = {1833},
+    RUPTURE = {1943, 8639, 8640, 11273, 11274, 11275},
+    FEINT = {1966, 6768, 8637, 11303},
+    MUTILATE = {1241582, 1241584},
+    ARCANE_BLAST = {1239696, 1239697, 1239699, 1239700},
+    ICE_LANCE = {400640, 1240044, 1240045, 1240046, 1240047},
+    FROSTFIRE = {401502, 1237312, 1237313},
+    BLAST_WAVE = {13018, 13019, 13020, 13021},
+    FLAMESTRIKE = {2120, 2121, 8422, 8423, 10215, 10216},
+    PENANCE = {1240720, 1240721, 1316995},
+    PRAYER_OF_MENDING = {1240826, 1240827},
+    SW_DEATH = {1309595, 1309633, 1309635, 1309636},
+    HOLY_NOVA = {15430, 15431, 27799, 27800, 27801},
+    BINDING_HEAL = {401937, 402837, 1240770, 1240771, 1240772, 1240773, 1240774},
+    PRAYER_OF_HEALING = {596, 996, 10960, 10961},
+    DEVOURING_PLAGUE = {2944, 19276, 19277, 19278, 19279, 19280},
+    COUNTERATTACK = {20909, 20910, 1242634},
+    CONFLAGRATE = {17962, 18930, 18931, 18932, 1293818},
+    SEARING_PAIN = {5676, 17919, 17920, 17921, 17922, 17923},
+    SOUL_FIRE = {6353, 17924},
+    INCINERATE = {1293812, 1293813},
+    SIPHON_LIFE = {18879, 18880, 18881},
+    FEAR = {5782, 6213, 6215},
+    LACERATE = {414644, 1235826, 1235827},
+    POUNCE = {9005, 9823, 9827},
+    RAVAGE = {6785, 6787, 9866, 9867},
+    FIRE_NOVA = {408341, 408342, 408343, 408344, 408345},
     ABOLISH_POISON = {2893},
     AIMED = {19434, 20900, 20901, 20902, 20903, 20904},
     ARCANE_EXPLOSION = {1449, 8437, 8438, 8439, 10201, 10202},
@@ -489,7 +536,7 @@ end
 -- Sem confirmacao de "usavel" elas nunca sao sugeridas pela regra comum; o
 -- brilho de proc da Blizzard continua sugerindo-as quando acendem.
 local REACTIVE = { EXECUTE = true, OVERPOWER = true, REVENGE = true, RIPOSTE = true,
-                   MONGOOSE = true, HOW = true }
+                   MONGOOSE = true, HOW = true, VICTORY_RUSH = true, COUNTERATTACK = true, CONFLAGRATE = true }
 
 local function Ready(key, unit)
     local name = N[key]
@@ -632,16 +679,19 @@ local gear = { shield = false, twoHand = false, speed = 2.0 }
 local tcache = {}                    -- tipo/classificacao do alvo atual (limpo ao trocar de alvo)
 
 local function RefreshGear()
-    local function equipLoc(slot)
+    local function itemInfo(slot)
         local id = GetInventoryItemID("player", slot)
         if type(id) ~= "number" then return nil end
         local f = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
         if not f then return nil end
-        local ok, _, _, _, loc = pcall(f, id)
-        return ok and loc or nil
+        local ok, _, _, _, loc, _, classID, subID = pcall(f, id)
+        if not ok then return nil end
+        return loc, classID, subID
     end
-    gear.twoHand = equipLoc(16) == "INVTYPE_2HWEAPON"
-    gear.shield = equipLoc(17) == "INVTYPE_SHIELD"
+    local mainLoc, mainClass, mainSub = itemInfo(16)
+    gear.twoHand = mainLoc == "INVTYPE_2HWEAPON"
+    gear.dagger = mainClass == 2 and mainSub == 15     -- adaga: Furtividade/Esfaquear funcionam melhor
+    gear.shield = (itemInfo(17)) == "INVTYPE_SHIELD"
     local sp = UnitAttackSpeed and Pub((UnitAttackSpeed("player")))
     if type(sp) == "number" and sp > 0 then gear.speed = sp end
 end
@@ -761,6 +811,14 @@ local CREATURE_HUMANOID = { ["Humanoid"] = true, ["Humanoide"] = true }
 -- observada (sealDur). No Forever o Julgamento nao consome mais o selo.
 local SEAL_KEYS = { "SEAL_FURY", "SOC", "SOR", "SOTC", "SOJ", "SOL", "SOW" }
 local sealState = { key = nil, expires = 0 }
+local lastCast = { key = nil, t = 0, at = {}, self = {}, cp = 0,
+    -- pontos de combo: cada gerador soma, cada finalizador zera (GetComboPoints fica secreto em combate)
+    cpb = { SINISTER = 1, BACKSTAB = 1, AMBUSH = 1, GARROTE = 1, CHEAP_SHOT = 1, GOUGE = 1, MUTILATE = 2,
+            CLAW = 1, RAKE = 1, SHRED = 1, POUNCE = 1, RAVAGE = 1 },
+    cpf = { EVISCERATE = 1, SND = 1, RUPTURE = 1, KIDNEY = 1, RIP = 1, BITE = 1 },
+    -- duracao dos DoTs (s): as sequencias so mandam reaplicar se o DoT ja caiu
+    dur = { CORRUPTION = 14, IMMOLATE = 12, SERPENT = 12, MOONFIRE = 10, INSECT_SWARM = 11, RAKE = 8, SWP = 16,
+            FLAME_SHOCK = 10, REND = 12, RIP = 9, COA = 22, SIPHON_LIFE = 26 } }   -- ultima skill sua e o instante de cada uma (DoTs sem auras)
 local sealDur = 30
 
 local function UpdateSealFromAuras()
@@ -788,11 +846,13 @@ local function BuildContext()
     c.hpKnown = UnitPct("player") ~= nil
     local maxPow, pow = Pub(UnitPowerMax("player")), Pub(UnitPower("player"))
     c.power = pow or 0
+    c.powerKnown = pow ~= nil          -- false em combate no Forever: as regras assumem que ha recurso
     c.powerPct = (pow and maxPow and maxPow > 0) and (pow / maxPow * 100) or 0
     local maxMana, mana = Pub(UnitPowerMax("player", 0)), Pub(UnitPower("player", 0))
     c.manaPct = (mana and maxMana and maxMana > 0) and (mana / maxMana * 100) or 100
-    c.cp = Pub(GetComboPoints("player", "target")) or 0
+    c.cp = Pub(GetComboPoints("player", "target")) or lastCast.cp or 0
     c.grouped = Is(IsInGroup())
+    c.stealth = Is(IsStealthed and IsStealthed())
 
     c.target = UnitExists("target")
     -- Se o jogo esconder se o alvo e atacavel, em combate assumimos que o alvo
@@ -836,6 +896,7 @@ local function BuildContext()
     c.aoe = c.enemies >= DB.aoe
     c.meleeAoe = c.near >= DB.aoe
 
+    if c.inCombat and not c.prevCombat then c.combatStart = c.now end
     if c.inCombat ~= c.prevCombat then lastGroupScan = 0 end -- rescan na entrada/saida de combate
     c.prevCombat = c.inCombat
     if c.now - lastGroupScan > GROUP_SCAN_INTERVAL then
@@ -867,6 +928,24 @@ local function Lacks(key)
 end
 local function NotOnTarget(key) return not auraSecret.target and not OnTarget(key) end
 local function NotOnTargetAny(key) return not auraSecret.target and not OnTargetAny(key) end
+-- DoT/debuff meu no alvo ausente? Com auras legiveis: exato. Em combate (auras secretas): pelo
+-- tempo desde que EU o lancei (dur = duracao em segundos). Zera ao trocar de alvo.
+local function DotDown(key, dur)
+    if not N[key] then return false end
+    if not auraSecret.target then return not OnTarget(key) end
+    local t = lastCast.at[key]
+    return t == nil or (GetTime() - t) > dur
+end
+-- Buff meu em mim ausente? Auras legiveis: exato. Auras secretas: pela consulta por Spell ID
+-- e, se ela tambem for bloqueada, pelo tempo desde que EU o lancei (dur em segundos).
+local function BuffDown(key, dur)
+    if not N[key] then return false end
+    if not auraSecret.player then return not playerBuffs[N[key]] end
+    local r = PlayerAuraByID(RANKID[key] or ID[key])
+    if r ~= nil then return r == false end
+    local t = lastCast.self[key]
+    return t == nil or (GetTime() - t) > dur
+end
 local function AnyOnTarget(...) for i = 1, select("#", ...) do if OnTarget((select(i, ...))) then return true end end end
 
 -- true = tem, false = nao tem, nil = desconhecido (auras secretas)
@@ -1007,20 +1086,26 @@ CLASS_RULES.WARRIOR = function()
         BigCastDefense("SHIELD_BLOCK"),
         Taunt("TAUNT", tank),
         SelfBuff("BATTLE_SHOUT", nil, true),
+        Hit("COMBO", "CHARGE", function(c) return not c.inCombat end, "Abertura: Investida"),
+        Hit("COMBO", "VICTORY_RUSH", nil, "Vitoria Rapida: cura 10% da vida (ate 20s apos matar)"),
+        R("COMBO", "BLOODRAGE", function(c) return c.inCombat and c.hp > 60 and (c.now - (c.combatStart or c.now)) < 8 end,
+            "Inicio da luta: Ira Sangrenta (gera Raiva)", "player"),
         Hit("COMBO", "EXECUTE", nil, "Alvo < 20%: Executar!"),
         Hit("COMBO", "OVERPOWER", nil, "Alvo esquivou: Sobrepujar!"),
         Hit("COMBO", "REVENGE", nil, "Bloqueio/Esquiva: Revanche!"),
         R("AOE", "SWEEPING", function(c) return c.inCombat and c.meleeAoe end, "Varios mobs: ative Golpes Amplos"),
         Hit("AOE", "WHIRLWIND", function(c) return c.near >= 2 end,
             function() return Buff("SWEEPING") and "COMBO Golpes Amplos -> Redemoinho" or "Varios mobs: Redemoinho" end),
-        Hit("AOE", "THUNDER_CLAP", function(c) return c.meleeAoe and NotOnTargetAny("THUNDER_CLAP") end, "Area: Trovoada"),
-        Hit("AOE", "DEMO_SHOUT", function(c) return c.meleeAoe and NotOnTargetAny("DEMO_SHOUT") end, "Area: Grito Desmoralizante"),
-        Hit("AOE", "CLEAVE", function(c) return c.near >= 2 and c.power >= 40 end, "Raiva sobrando: Cutilada"),
+        Hit("AOE", "THUNDER_CLAP", function(c) return c.meleeAoe and DotDown("THUNDER_CLAP", 18) end, "Area: Trovoada"),
+        Hit("AOE", "DEMO_SHOUT", function(c) return c.meleeAoe and DotDown("DEMO_SHOUT", 25) end, "Area: Grito Desmoralizante"),
+        Hit("AOE", "CLEAVE", function(c) return c.near >= 2 and (not c.powerKnown or c.power >= 40) end, "Raiva sobrando: Cutilada"),
         Hit("ROTATION", "SHIELD_SLAM", nil, "Golpe de Escudo"),
         Hit("ROTATION", { "BLOODTHIRST", "MORTAL_STRIKE" }, nil, "Golpe principal"),
-        Hit("ROTATION", "SUNDER", function(c) return tank() and NotOnTarget("SUNDER") end, "Gere ameaca: Fender Armadura"),
-        Hit("ROTATION", "REND", function(c) return c.thp > 30 and NotOnTarget("REND") end, "Aplique Dilacerar"),
-        Hit("ROTATION", "HEROIC_STRIKE", function(c) return c.power >= 50 end, "Raiva alta: Golpe Heroico"),
+        Hit("ROTATION", "SLAM", nil, "Golpe Poderoso (recarga 15s)"),
+        R("ROTATION", "RECKLESSNESS", function(c) return c.hostile and c.inCombat and c.elite end, "Elite/chefe: Temeridade", "player"),
+        Hit("ROTATION", "SUNDER", function(c) return tank() and DotDown("SUNDER", 25) end, "Gere ameaca: Fender Armadura"),
+        Hit("ROTATION", "REND", function(c) return c.thp > 30 and DotDown("REND", 12) end, "Aplique Dilacerar"),
+        Hit("ROTATION", "HEROIC_STRIKE", function(c) return not c.powerKnown or c.power >= 50 end, "Raiva alta: Golpe Heroico"),
     }
 end
 
@@ -1032,18 +1117,26 @@ CLASS_RULES.ROGUE = function()
         Interrupt("GOUGE"),
         Hit("INTERRUPT", "KIDNEY", function(c) return c.cast and not c.cast.unknownInt and c.cp >= 1 end, "Sem Chute: Golpe nos Rins"),
         R("AOE", "BLADE_FLURRY", function(c) return c.inCombat and c.near >= 2 end, "Varios mobs: Rajada de Laminas"),
+        Hit("COMBO", function() return gear.dagger and { "AMBUSH", "CHEAP_SHOT", "GARROTE" } or { "CHEAP_SHOT", "GARROTE", "AMBUSH" } end,
+            function(c) return c.stealth and not c.inCombat end, "Furtivo: abertura (Emboscada exige adaga)"),
         Hit("COMBO", "RIPOSTE", nil, "Aparou! Ripostar"),
-        Hit("COMBO", "SND", function(c) return c.cp >= 2 and Lacks("SND") and c.thp > 25 end,
+        Hit("COMBO", "SND", function(c) return c.cp >= 2 and BuffDown("SND", 24) and c.thp > 25 end,
             "Pontos de combo: ative Picar"),
+        Hit("COMBO", "RUPTURE", function(c) return c.cp >= 4 and c.elite and DotDown("RUPTURE", 12) end, "Elite: Ruptura (sangramento)"),
         Hit("COMBO", "EVISCERATE", function(c) return c.cp >= 5 or (c.cp >= 2 and c.thp < 15) end,
             function(c) return c.cp .. " pontos: Eviscerar!" end),
         R("ROTATION", "ADRENALINE", function(c) return c.inCombat and c.elite end, "Elite/chefe: Adrenalina"),
-        Hit("ROTATION", "SINISTER", nil, "Gere pontos: Golpe Sinistro"),
+        Hit("ROTATION", function()
+            local facingMe = UnitExists("targettarget") and UnitIsUnit("targettarget", "player")
+            if gear.dagger and not facingMe then return { "BACKSTAB", "SINISTER" } end
+            return { "SINISTER", "BACKSTAB" }
+        end, nil, "Gere pontos: Esfaquear (por tras, adaga) / Golpe Sinistro"),
     }
 end
 
 CLASS_RULES.MAGE = function()
     local function filler()
+        if Known("ARCANE_BLAST") then return { "ARCANE_BLAST", "FROSTBOLT", "FIREBALL" } end   -- especializacao Arcana
         if Known("PYROBLAST") or Known("COMBUSTION") or not Known("FROSTBOLT") then return { "FIREBALL", "FROSTBOLT" } end
         return { "FROSTBOLT", "FIREBALL" }
     end
@@ -1062,7 +1155,8 @@ CLASS_RULES.MAGE = function()
         Hit("COMBO", fill, function() return Buff("MAGE_CLEARCAST") end, "COMBO Clarividencia -> feitico forte gratis"),
         R("COMBO", "PRESENCE_OF_MIND", function(c) return c.hostile and c.inCombat end, "Prepare: Presenca da Mente (depois Piroblasto)"),
         R("COMBO", { "ARCANE_POWER", "COMBUSTION" }, function(c) return c.hostile and c.inCombat and c.elite end, "Elite/chefe: ative cooldown de dano"),
-        R("AOE", "FROST_NOVA", function(c) return c.inCombat and c.meleeAoe and NotOnTargetAny("FROST_NOVA") end, "FARM: Nova Congelante -> Explosao Arcana"),
+        R("AOE", "FROST_NOVA", function(c) return c.inCombat and c.meleeAoe and DotDown("FROST_NOVA", 8) end, "FARM: Nova Congelante -> Explosao Arcana"),
+        R("AOE", "BLAST_WAVE", function(c) return c.meleeAoe and c.hostile end, "Mobs colados: Onda Explosiva (dano + lentidao)"),
         R("AOE", "CONE_OF_COLD", function(c) return c.meleeAoe and c.hostile end, "Area: Cone de Gelo"),
         R("AOE", "ARCANE_EXPLOSION", function(c) return c.meleeAoe end, "Mobs agrupados: Explosao Arcana"),
         R("AOE", "BLIZZARD", function(c) return c.enemies >= DB.aoe + 1 and not c.meleeAoe end, "Mobs a distancia: Nevasca"),
@@ -1088,13 +1182,19 @@ CLASS_RULES.PRIEST = function()
         HealLowest({ "FLASH_HEAL", "HEAL", "LESSER_HEAL" }, 40),
         R("COMBO", { "GREATER_HEAL", "HEAL" }, function(c, u) return Buff("INNER_FOCUS") and u and c.lowestPct < 70 end,
             "COMBO Foco Interior -> cura grande gratis", function(c) return c.lowest end),
+        HealLowest("PENANCE", 55),
         HealLowest({ "GREATER_HEAL", "HEAL", "LESSER_HEAL" }, 60),
         HealLowest("RENEW", 85, function(c, u) return UnitLacksAura(u, "RENEW", "HELPFUL") end),
+        R("HEAL", "PRAYER_OF_MENDING", function(c) return c.grouped and c.inCombat and (not c.target or (not c.hostileSecret and not c.hostile)) end,
+            "Prayer of Mending (10s): jogue no tanque ou aliado"),
         Hit("COMBO", "MIND_BLAST", function() return Buff("INNER_FOCUS") end, "COMBO Foco Interior -> Explosao Mental"),
         SelfBuff("SHADOWFORM", nil, true),
-        Hit("ROTATION", "SWP", function(c) return NotOnTarget("SWP") and c.thp > 20 end, "Aplique Palavra Sombria: Dor"),
+        R("AOE", "HOLY_NOVA", function(c) return c.meleeAoe and c.manaPct > 30 end, "Varios inimigos colados: Nova Sagrada"),
+        Hit("ROTATION", "SWP", function(c) return DotDown("SWP", 16) and c.thp > 20 end, "Aplique Palavra Sombria: Dor"),
         Hit("ROTATION", "HOLY_FIRE", function(c) return not c.inCombat end, "Abertura: Fogo Sagrado"),
         Hit("ROTATION", "MIND_BLAST", nil, "Explosao Mental"),
+        Hit("ROTATION", "PENANCE", nil, "Penance (12s): dano Sagrado no inimigo"),
+        Hit("ROTATION", "SW_DEATH", function(c) return c.hpKnown and c.hp >= 60 end, "Shadow Word: Death (18s): tira 30% da sua vida se o alvo sobreviver"),
         Hit("ROTATION", { "MIND_FLAY", "SMITE" }, nil, "Dano continuo"),
         SelfBuff("PW_FORT"),
         SelfBuff("INNER_FIRE"),
@@ -1223,12 +1323,13 @@ CLASS_RULES.HUNTER = function()
         Hit("INTERRUPT", "SCATTER", function(c) return c.cast and c.cast.interruptible and not c.cast.unknownInt end, function(c) return "Interrompa: " .. c.cast.name end),
         R("BUFF", "HAWK", function(c) return c.hostile and not c.melee and Lacks("HAWK") end, "Combate a distancia: Aspecto do Falcao", "player"),
         Hit("COMBO", "MONGOOSE", function(c) return c.melee end, "Alvo esquivou: Mordida do Mangusto"),
-        Hit("ROTATION", "WING_CLIP", function(c) return c.melee and NotOnTarget("WING_CLIP") and not c.grouped end, "Colado: Cortar Asas e afaste-se"),
+        Hit("COMBO", "COUNTERATTACK", function(c) return c.melee end, "Aparou! Contra-ataque"),
+        Hit("ROTATION", "WING_CLIP", function(c) return c.melee and DotDown("WING_CLIP", 7) and not c.grouped end, "Colado: Cortar Asas e afaste-se"),
         Hit("ROTATION", "RAPTOR", function(c) return c.melee end, "Corpo a corpo: Golpe do Raptor"),
-        Hit("ROTATION", "MARK", function(c) return NotOnTargetAny("MARK") and (c.elite or c.thp > 60) end, "Marque o alvo"),
+        Hit("ROTATION", "MARK", function(c) return DotDown("MARK", 100) and (c.elite or c.thp > 60) end, "Marque o alvo"),
         Hit("AOE", { "VOLLEY", "MULTI" }, function(c) return c.aoe end, "Varios mobs: dano em area"),
         R("ROTATION", "RAPID_FIRE", function(c) return c.hostile and c.inCombat and c.elite end, "Elite/chefe: Disparo Rapido"),
-        Hit("ROTATION", "SERPENT", function(c) return NotOnTarget("SERPENT") and c.thp > 30 end, "Aplique Picada da Serpente"),
+        Hit("ROTATION", "SERPENT", function(c) return DotDown("SERPENT", 12) and c.thp > 30 end, "Aplique Picada da Serpente"),
         Hit("ROTATION", "AIMED", function(c) return not c.melee end, "Tiro Mirado"),
         Hit("ROTATION", "MULTI", function(c) return not c.melee end, "Tiro Multiplo"),
         Hit("ROTATION", "ARCANE_SHOT", function(c) return not c.melee end, "Tiro Arcano"),
@@ -1249,9 +1350,14 @@ CLASS_RULES.WARLOCK = function()
         Hit("ROTATION", "DRAIN_LIFE", function(c) return c.hp < 45 end, "Recupere vida: Drenar Vida"),
         Hit("AOE", "RAIN_OF_FIRE", function(c) return c.aoe and not c.meleeAoe end, "Varios mobs: Chuva de Fogo"),
         R("AOE", "HELLFIRE", function(c) return c.meleeAoe and c.hp > 50 end, "Mobs colados: Fogo do Inferno"),
-        Hit("ROTATION", "CORRUPTION", function(c) return NotOnTarget("CORRUPTION") and c.thp > 20 end, "Aplique Corrupcao"),
-        Hit("ROTATION", "COA", function(c) return not auraSecret.target and not anyCurse() and c.thp > 30 end, "Aplique uma Maldicao"),
-        Hit("ROTATION", "IMMOLATE", function(c) return NotOnTarget("IMMOLATE") and c.thp > 30 end, "Aplique Imolar"),
+        Hit("ROTATION", "SOUL_FIRE", function(c) return not c.inCombat and c.elite end, "Abertura em elite: Fogo da Alma (usa fragmento)"),
+        Hit("ROTATION", "COA", function(c) return DotDown("COA", 22) and c.thp > 30 end, "Aplique o Bane da Agonia"),
+        Hit("ROTATION", { "COE", "COW" }, function(c) return DotDown("COE", 100) and DotDown("COW", 100) and c.thp > 30 end,
+            "Aplique uma Maldicao (separada do Bane)"),
+        Hit("ROTATION", "CORRUPTION", function(c) return DotDown("CORRUPTION", 14) and c.thp > 20 end, "Aplique Corrupcao"),
+        Hit("ROTATION", "SIPHON_LIFE", function(c) return DotDown("SIPHON_LIFE", 26) and c.thp > 30 end, "Aplique Dreno de Vida (cura voce)"),
+        Hit("ROTATION", "IMMOLATE", function(c) return DotDown("IMMOLATE", 12) and c.thp > 30 end, "Aplique Imolar"),
+        Hit("COMBO", "CONFLAGRATE", nil, "Imolar no alvo: Conflagrar"),
         Hit("ROTATION", "SHADOW_BOLT", nil, "Seta Sombria"),
         SelfBuff({ "DEMON_ARMOR", "DEMON_SKIN" }),
     }
@@ -1263,6 +1369,15 @@ CLASS_RULES.SHAMAN = function()
         if not GetTotemInfo then return false end
         local has = GetTotemInfo(1)
         return not issecret(has) and not has
+    end
+    -- totem de fogo no chao: lido fora de combate; em combate vale o que VOCE colocou ha pouco
+    local function fireTotemUp()
+        if GetTotemInfo then
+            local has = GetTotemInfo(1)
+            if not issecret(has) and (has == true or (type(has) == "number" and has > 0)) then return true end
+        end
+        local t = lastCast.self.SEARING or lastCast.self.MAGMA
+        return t ~= nil and (GetTime() - t) < 30
     end
     return {
         R("EMERGENCY", "NS_SHAMAN", function(c) return c.inCombat and c.lowestPct < 30 end, "Emergencia: Rapidez da Natureza -> Onda Curativa"),
@@ -1282,10 +1397,11 @@ CLASS_RULES.SHAMAN = function()
         Hit("COMBO", "LIGHTNING_BOLT", function() return Buff("SHAMAN_CLEARCAST") or Buff("ELEM_MASTERY") end, "COMBO Clarividencia -> Raio"),
         R("COMBO", "ELEM_MASTERY", function(c) return c.hostile and c.inCombat and c.elite end, "Elite/chefe: Dominio Elemental"),
         Hit("ROTATION", "STORMSTRIKE", nil, "Ataque de Tempestade"),
-        R("AOE", { "MAGMA", "FIRE_NOVA" }, function(c) return c.meleeAoe and noFireTotem() end, "Varios mobs: totem de fogo em area"),
+        R("AOE", "MAGMA", function(c) return c.meleeAoe and noFireTotem() end, "Varios mobs: totem de fogo em area"),
+        Hit("AOE", "FIRE_NOVA", function(c) return c.enemies >= 2 and fireTotemUp() end, "Fire Nova (10s): explode em volta do totem de fogo"),
         Hit("AOE", "CHAIN_LIGHTNING", function(c) return c.enemies >= 2 end, "Varios mobs: Cadeia de Raios"),
         R("ROTATION", "SEARING", function(c) return c.hostile and c.inCombat and noFireTotem() end, "Totem Calcinante"),
-        Hit("ROTATION", "FLAME_SHOCK", function(c) return NotOnTarget("FLAME_SHOCK") and c.thp > 30 end, "Aplique Choque Flamejante"),
+        Hit("ROTATION", "FLAME_SHOCK", function(c) return DotDown("FLAME_SHOCK", 10) and c.thp > 30 end, "Aplique Choque Flamejante"),
         Hit("ROTATION", "EARTH_SHOCK", function(c) return c.melee and c.manaPct > 50 end, "Choque Terreno"),
         Hit("ROTATION", "LIGHTNING_BOLT", function(c) return not c.melee or not c.inCombat end, "Raio"),
     }
@@ -1313,20 +1429,23 @@ CLASS_RULES.DRUID = function()
         Hit("COMBO", "MAUL", function() return bear() and Buff("DRUID_CLEARCAST") end, "COMBO Clarividencia -> Espancar gratis"),
         Hit("AOE", "DEMO_ROAR", function(c) return bear() and c.near >= 2 and NotOnTargetAny("DEMO_ROAR") end, "Area: Rugido Desmoralizante"),
         Hit("AOE", "SWIPE", function(c) return bear() and c.near >= 2 end, "Varios mobs: Golpe Giratorio"),
-        Hit("ROTATION", "MAUL", function(c) return bear() and c.power >= 15 end, "Espancar"),
+        Hit("ROTATION", "LACERATE", function(c) return bear() and DotDown("LACERATE", 12) end, "Lacerar (sangramento de urso, acumula)"),
+        Hit("ROTATION", "MAUL", function(c) return bear() and (not c.powerKnown or c.power >= 15) end, "Espancar"),
         -- Gato (dano)
+        Hit("COMBO", { "POUNCE", "RAVAGE" }, function(c) return cat() and c.stealth and not c.inCombat end,
+            "Rondar: abertura (Ravage por tras, Pounce atordoa)"),
         Hit("COMBO", "SHRED", function() return cat() and Buff("DRUID_CLEARCAST") end, "COMBO Clarividencia -> Retalhar (por tras)"),
-        Hit("COMBO", "RIP", function(c) return cat() and c.cp >= 5 and NotOnTarget("RIP") and c.thp > 40 end, "5 pontos: Rasgar"),
+        Hit("COMBO", "RIP", function(c) return cat() and c.cp >= 5 and DotDown("RIP", 9) and c.thp > 40 end, "5 pontos: Rasgar"),
         Hit("COMBO", "BITE", function(c) return cat() and (c.cp >= 5 or (c.cp >= 3 and c.thp < 20)) end, function(c) return c.cp .. " pontos: Mordida Feroz" end),
-        R("ROTATION", "TIGERS_FURY", function(c) return cat() and c.hostile and c.inCombat and Lacks("TIGERS_FURY") and c.power >= 80 end, "Furia do Tigre"),
-        Hit("ROTATION", "RAKE", function(c) return cat() and NotOnTarget("RAKE") end, "Aplique Rasgadura"),
+        R("ROTATION", "TIGERS_FURY", function(c) return cat() and c.hostile and c.inCombat and BuffDown("TIGERS_FURY", 5) and (not c.powerKnown or c.power >= 80) end, "Furia do Tigre"),
+        Hit("ROTATION", "RAKE", function(c) return cat() and DotDown("RAKE", 8) end, "Aplique Rasgadura"),
         Hit("ROTATION", "CLAW", function() return cat() end, "Gere pontos: Garra"),
         -- Conjurador / Equilibrio
         Hit("COMBO", "STARFIRE", function() return caster() and Buff("DRUID_CLEARCAST") end, "COMBO Clarividencia -> Fogo Estelar gratis"),
         R("AOE", "HURRICANE", function(c) return caster() and c.enemies >= DB.aoe + 1 end, "Varios mobs: Furacao"),
-        Hit("ROTATION", "FAERIE_FIRE", function(c) return caster() and c.elite and NotOnTargetAny("FAERIE_FIRE") end, "Elite: Fogo Feerico"),
-        Hit("ROTATION", "MOONFIRE", function(c) return caster() and NotOnTarget("MOONFIRE") end, "Aplique Fogo Lunar"),
-        Hit("ROTATION", "INSECT_SWARM", function(c) return caster() and NotOnTarget("INSECT_SWARM") and c.thp > 30 end, "Aplique Enxame de Insetos"),
+        Hit("ROTATION", "FAERIE_FIRE", function(c) return caster() and c.elite and DotDown("FAERIE_FIRE", 35) end, "Elite: Fogo Feerico"),
+        Hit("ROTATION", "MOONFIRE", function(c) return caster() and DotDown("MOONFIRE", 10) end, "Aplique Fogo Lunar"),
+        Hit("ROTATION", "INSECT_SWARM", function(c) return caster() and DotDown("INSECT_SWARM", 11) and c.thp > 30 end, "Aplique Enxame de Insetos"),
         Hit("ROTATION", "STARFIRE", function(c) return caster() and c.thp > 40 end, "Fogo Estelar"),
         Hit("ROTATION", "WRATH", function() return caster() end, "Ira"),
         R("BUFF", "MOTW", function(c) return not c.inCombat and caster() and Lacks("MOTW") end, "Buff ausente", "player"),
@@ -1389,13 +1508,13 @@ local PROC_RULE = { cat = "COMBO", pick = {}, proc = true,
 -- COMBOS PELA SUA ULTIMA SKILL. Os seus proprios casts continuam legiveis em
 -- combate (UNIT_SPELLCAST_SUCCEEDED do "player"), entao "usei A -> use B" funciona
 -- mesmo com auras e buffs escondidos. { de, para, janela(s), mensagem, unidade }
-local lastCast = { key = nil, t = 0 }
 local castSeen, castReadable = 0, 0
 local nameToKey
 
 local SEQUENCES = {
     MAGE = {
         { "PRESENCE_OF_MIND", "PYROBLAST", 15, "Presenca da Mente usada: Piroblasto!", "target" },
+        { "FROST_NOVA", "ICE_LANCE", 5, "Nova Congelante usada: Ice Lance no alvo congelado", "target" },
         { "FROST_NOVA", "ARCANE_EXPLOSION", 6, "Nova Congelante usada: Explosao Arcana" },
         { "COMBUSTION", { "FIREBALL", "SCORCH" }, 30, "Combustao ativa: continue com fogo", "target" },
     },
@@ -1441,7 +1560,9 @@ local function AfterRule(def)
     local set = {}
     for _, k in ipairs(type(from) == "table" and from or { from }) do set[k] = true end
     return R("COMBO", to, function()
-        return lastCast.key and set[lastCast.key] and (GetTime() - lastCast.t) <= window
+        if not (lastCast.key and set[lastCast.key] and (GetTime() - lastCast.t) <= window) then return false end
+        local d = type(to) == "string" and lastCast.dur[to]
+        return not d or DotDown(to, d)
     end, msg, unit)
 end
 
@@ -1461,6 +1582,10 @@ local function OnPlayerCast(sid)
     local key = nameToKey[name]
     if key then
         lastCast.key, lastCast.t = key, GetTime()
+        lastCast.at[key] = lastCast.t     -- debuffs no alvo (zera ao trocar de alvo)
+        lastCast.self[key] = lastCast.t   -- buffs em voce
+        if lastCast.cpb[key] then lastCast.cp = math.min(5, lastCast.cp + lastCast.cpb[key])
+        elseif lastCast.cpf[key] then lastCast.cp = 0 end
         -- selo lancado por voce: rastreia qual e ate quando (o jogo esconde as auras em combate)
         for _, sk in ipairs(SEAL_KEYS) do
             if key == sk then sealState.key, sealState.expires = key, GetTime() + sealDur end
@@ -1979,7 +2104,7 @@ core:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         pcall(RefreshGear)
         elapsed = UPDATE_INTERVAL
     elseif event == "PLAYER_TARGET_CHANGED" or event:find("^UNIT_SPELLCAST_") then
-        if event == "PLAYER_TARGET_CHANGED" then wipe(tcache) end -- tipo/classe do alvo anterior nao vale mais
+        if event == "PLAYER_TARGET_CHANGED" then wipe(tcache); wipe(lastCast.at); lastCast.cp = 0 end -- tipo/classe do alvo anterior nao vale mais
         elapsed = UPDATE_INTERVAL -- reavalia imediatamente
     end
 end)
