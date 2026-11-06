@@ -2353,7 +2353,8 @@ core:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
                 core:RegisterEvent(e)
             end
         end
-        print("|cff33ccffMVAT|r carregado para " .. (UnitClass("player")) .. ". Digite |cffffff00/mvat|r para opcoes.")
+        extra.registerSettings()
+        print("|cff33ccffMVAT|r carregado para " .. (UnitClass("player")) .. ". Digite |cffffff00/mvat|r para abrir as opcoes.")
     elseif event == "SPELLS_CHANGED" or event == "LEARNED_SPELL_IN_TAB" or event == "PLAYER_LEVEL_UP"
         or event == "CHARACTER_POINTS_CHANGED" then
         RefreshSpells()
@@ -2393,17 +2394,257 @@ end)
 
 local function Msg(text) print("|cff33ccffMVAT|r " .. text) end
 
+---------------------------------------------------------------------------
+-- 11. JANELA DE OPCOES (/mvat abre; tambem em Esc > Opcoes > AddOns)
+---------------------------------------------------------------------------
+-- Visual inspirado no Leatrix: painel escuro com pergaminho, duas colunas com titulos
+-- dourados, caixas de selecao nativas, dica ao passar o mouse, sliders com o valor ao lado,
+-- rodape com botoes, posicao lembrada e Esc fecha. So usa fontes e texturas nativas do jogo
+-- (nenhum template), entao funciona igual com ElvUI/EllesmereUI.
+do
+    local W, H = 470, 340
+    local f = CreateFrame("Frame", "MVAT_Options", UIParent)
+    f:SetSize(W, H)
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    f:SetFrameStrata("FULLSCREEN_DIALOG"); f:SetFrameLevel(20)
+    f:SetClampedToScreen(true); f:EnableMouse(true); f:SetMovable(true); f:RegisterForDrag("LeftButton")
+    f:Hide()
+    if _G.UISpecialFrames then table.insert(_G.UISpecialFrames, "MVAT_Options") end   -- Esc fecha
+
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local p, _, r, x, y = self:GetPoint()
+        if DB and p then DB.optPos = { p, r, x, y } end   -- lembra onde voce deixou
+    end)
+
+    -- fundo + pergaminho (mesmas texturas do Leatrix; ja existem no cliente)
+    local PARCH = "Interface\\ACHIEVEMENTFRAME\\UI-GuildAchievement-Parchment-Horizontal-Desaturated.png"
+    local bg = f:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints(); bg:SetColorTexture(0.05, 0.05, 0.05, 0.9)
+    local body = f:CreateTexture(nil, "BORDER")
+    body:SetTexture(PARCH); body:SetSize(W, H - 17); body:SetPoint("TOPRIGHT")
+    body:SetVertexColor(0.7, 0.7, 0.7, 0.7); body:SetTexCoord(0.09, 1, 0, 1)
+    local foot = f:CreateTexture(nil, "BORDER")
+    foot:SetTexture(PARCH); foot:SetSize(W, 48); foot:SetPoint("BOTTOM"); foot:SetVertexColor(0.5, 0.5, 0.5, 1)
+
+    -- titulo e subtitulo
+    local mt = f:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    mt:SetPoint("TOPLEFT", 16, -16); mt:SetText("MVAT - Tutor de Combate")
+    local sub = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    sub:SetPoint("TOPLEFT", mt, "BOTTOMLEFT", 0, -6)
+    sub:SetText("Só mostra o que usar. Nunca joga por você.")
+
+    ---------------------------------------------------------------- helpers
+    local controls = {}
+    local function Refresh() for _, c in ipairs(controls) do c.refresh() end end
+
+    local function Tip(self)
+        if self.tip and _G.GameTooltip then
+            _G.GameTooltip:SetOwner(self, "ANCHOR_NONE")
+            _G.GameTooltip:SetPoint("TOPLEFT", f, "TOPRIGHT", 10, 0)
+            _G.GameTooltip:SetText(self.tip, 1, 1, 1, 1, true)
+            _G.GameTooltip:Show()
+        end
+    end
+    local function TipOff() if _G.GameTooltip then _G.GameTooltip:Hide() end end
+
+    local function Heading(text, x, y)
+        local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+        t:SetPoint("TOPLEFT", x, y); t:SetText(text)
+        return t
+    end
+
+    local function Button(text, w, h)
+        local b = CreateFrame("Button", nil, f)
+        b:SetSize(w, h)
+        b.edge = b:CreateTexture(nil, "BACKGROUND")
+        b.edge:SetPoint("TOPLEFT", -1, 1); b.edge:SetPoint("BOTTOMRIGHT", 1, -1); b.edge:SetColorTexture(0.45, 0.45, 0.45, 1)
+        b.bg = b:CreateTexture(nil, "BORDER")
+        b.bg:SetAllPoints(); b.bg:SetColorTexture(0.1, 0.1, 0.1, 0.95)
+        b.hl = b:CreateTexture(nil, "HIGHLIGHT")
+        b.hl:SetAllPoints(); b.hl:SetColorTexture(1, 1, 1, 0.18)
+        b.label = b:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+        b.label:SetPoint("CENTER"); b.label:SetText(text)
+        b:SetScript("OnEnter", Tip); b:SetScript("OnLeave", TipOff)
+        return b
+    end
+
+    local function Check(x, y, label, tip, optKey, get, set)
+        local b = CreateFrame("CheckButton", nil, f)
+        b:SetSize(26, 26); b:SetPoint("TOPLEFT", f, "TOPLEFT", x, y)
+        b:SetNormalTexture("Interface\\Buttons\\UI-CheckBox-Up")
+        b:SetPushedTexture("Interface\\Buttons\\UI-CheckBox-Down")
+        b:SetHighlightTexture("Interface\\Buttons\\UI-CheckBox-Highlight", "ADD")
+        b:SetCheckedTexture("Interface\\Buttons\\UI-CheckBox-Check")
+        b.fs = b:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+        b.fs:SetPoint("LEFT", 24, 0); b.fs:SetWidth(172); b.fs:SetJustifyH("LEFT"); b.fs:SetWordWrap(false)
+        b.fs:SetText(label)
+        b:SetHitRectInsets(0, -170, 0, 0)
+        b.tip, b.optKey = tip, optKey
+        b:SetScript("OnEnter", Tip); b:SetScript("OnLeave", TipOff)
+        b:SetScript("OnClick", function() set(not get()); Refresh() end)
+        b.refresh = function() b:SetChecked(get() and true or false) end
+        controls[#controls + 1] = b
+        return b
+    end
+
+    -- slider simples (trilho + marcador); rotulo em cima, valor a direita (como no Leatrix)
+    local function Slide(x, y, label, tip, optKey, lo, hi, step, get, set, fmt)
+        local s = CreateFrame("Slider", nil, f)
+        s:SetOrientation("HORIZONTAL"); s:SetSize(110, 16); s:SetPoint("TOPLEFT", f, "TOPLEFT", x, y)
+        s:SetHitRectInsets(0, 0, -6, -6)
+        local track = s:CreateTexture(nil, "BACKGROUND")
+        track:SetPoint("LEFT", s, "LEFT", 0, 0); track:SetPoint("RIGHT", s, "RIGHT", 0, 0)
+        track:SetHeight(5); track:SetColorTexture(0.35, 0.35, 0.35, 1)
+        local thumb = s:CreateTexture(nil, "OVERLAY")
+        thumb:SetSize(10, 20); thumb:SetColorTexture(1, 0.82, 0, 1)
+        s:SetThumbTexture(thumb)
+        s:SetMinMaxValues(lo, hi); s:SetValueStep(step)
+        if s.SetObeyStepOnDrag then s:SetObeyStepOnDrag(true) end
+        if s.EnableMouseWheel then s:EnableMouseWheel(true) end
+        s.lab = s:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+        s.lab:SetPoint("TOP", s, "TOP", 0, 14); s.lab:SetText(label)
+        s.val = s:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+        s.val:SetPoint("LEFT", s, "RIGHT", 12, 0)
+        s.tip, s.optKey, s.syncing = tip, optKey, false
+        s:SetScript("OnEnter", Tip); s:SetScript("OnLeave", TipOff)
+        s:SetScript("OnValueChanged", function(self, v)
+            if self.syncing then return end
+            v = math.floor((v - lo) / step + 0.5) * step + lo
+            set(tonumber(string.format("%.2f", v)))
+            self.val:SetText(fmt(get()))
+        end)
+        s:SetScript("OnMouseWheel", function(self, d)
+            local v = get() + step * d
+            if v < lo then v = lo elseif v > hi then v = hi end
+            self:SetValue(v)
+        end)
+        s.refresh = function()
+            s.syncing = true; s:SetValue(get()); s.syncing = false
+            s.val:SetText(fmt(get()))
+        end
+        controls[#controls + 1] = s
+        return s
+    end
+
+    local function Pct(v) return string.format("%d%%", math.floor(v * 100 + 0.5)) end
+    local function Int(v) return tostring(math.floor(v + 0.5)) end
+
+    ---------------------------------------------------------------- coluna esquerda
+    Heading("Geral", 16, -72)
+    Check(16, -92, "Addon ativo", "Liga/desliga todo o MVAT.", "enabled",
+        function() return DB.enabled end,
+        function(v) DB.enabled = v; if not v then hud:Hide() end end)
+    Check(16, -114, "Mostrar só em combate", "Esconde o ícone fora de combate (some o lembrete de buffs).", "combatOnly",
+        function() return DB.combatOnly end, function(v) DB.combatOnly = v end)
+    Check(16, -136, "Mostrar o motivo", "Mostra o texto explicativo abaixo do ícone.", "showText",
+        function() return DB.showText end, function(v) DB.showText = v; ApplyLayout() end)
+    Check(16, -158, "Só habilidades da barra", "Só sugere o que está em alguma das suas barras de ação.|n|nDesligado, sugere tudo que você já aprendeu.", "barOnly",
+        function() return DB.barOnly end, function(v) DB.barOnly = v end)
+    Check(16, -180, "Travar posição do ícone", "Destravado, o ícone aparece para você arrastar até onde quiser.|n|nTravado, o clique atravessa o ícone.", "locked",
+        function() return DB.locked end,
+        function(v) DB.locked = v; ApplyLayout(); if v then hud:Hide() else HideSuggestion() end end)
+
+    ---------------------------------------------------------------- coluna direita
+    Heading("Painéis", 225, -72)
+    Check(225, -92, "LIMPAR: debuffs do grupo", "Mostra quem do grupo/raide tem veneno, doença, maldição ou magia que a sua classe remove, com a habilidade e a tecla.|n|nFunciona em combate.", "purge",
+        function() return DB.purge end, function(v) DB.purge = v end)
+    Check(225, -114, "Casts de chefes e elites", "Mostra o que os outros inimigos (não só o alvo) estão castando e em quem.", "ecasts",
+        function() return DB.ecasts end, function(v) DB.ecasts = v end)
+
+    if select(2, UnitClass("player")) == "PALADIN" then   -- playerClass so existe depois do login
+        Heading("Paladino", 225, -150)
+        local SEALS = { "auto", "furia", "retidao", "cruzado", "comando", "luz", "sabedoria", "justica" }
+        local sb = Button("", 200, 24)
+        sb:SetPoint("TOPLEFT", f, "TOPLEFT", 225, -172)
+        sb.tip, sb.optKey = "Clique para trocar o selo.|n|nAutomático: o addon escolhe pela sua arma, escudo e mana.|n|nSó aparecem os selos que você já aprendeu.", "seal"
+        sb:SetScript("OnClick", function()
+            local idx = 1
+            for i, n in ipairs(SEALS) do if n == (DB.seal or "auto") then idx = i end end
+            for step = 1, #SEALS do
+                local n = SEALS[(idx + step - 1) % #SEALS + 1]
+                local key = SEAL_PREF[n]
+                if n == "auto" or (key and Known(key)) then DB.seal = n; break end
+            end
+            Refresh()
+        end)
+        sb.refresh = function()
+            local cur = DB.seal or "auto"
+            local key = SEAL_PREF[cur]
+            sb.label:SetText(cur == "auto" and "Selo: Automático" or ("Selo: " .. ((key and N[key]) or cur)))
+        end
+        controls[#controls + 1] = sb
+    end
+
+    ---------------------------------------------------------------- tamanhos
+    Heading("Tamanho", 16, -222)
+    Slide(36, -266, "Ícone e painéis", "Arraste para mudar o tamanho do ícone e de todos os painéis.", "scale", 0.5, 3, 0.1,
+        function() return DB.scale end, function(v) DB.scale = v; ApplyLayout() end, Pct)
+    Slide(250, -266, "Inimigos p/ modo área", "A partir de quantos inimigos o addon passa a sugerir habilidades de área (farm).", "aoe", 2, 10, 1,
+        function() return DB.aoe end, function(v) DB.aoe = math.floor(v + 0.5) end, Int)
+
+    ---------------------------------------------------------------- rodape
+    local close = Button("X", 30, 30)
+    close:SetPoint("TOPRIGHT", 0, 0); close.optKey = "x"
+    close:SetScript("OnClick", function() f:Hide() end)
+    local bReset = Button("Restaurar padrão", 130, 25)
+    bReset:SetPoint("BOTTOMLEFT", 16, 10); bReset.optKey = "reset"
+    bReset.tip = "Volta todas as opções ao padrão (a posição do ícone também)."
+    bReset:SetScript("OnClick", function()
+        for k, v in pairs(DEFAULTS) do DB[k] = v end
+        ApplyLayout(); Refresh()
+        Msg("Posição e opções restauradas.")
+    end)
+    local bTest = Button("Testar ícone", 100, 25)
+    bTest:SetPoint("LEFT", bReset, "RIGHT", 10, 0); bTest.optKey = "test"
+    bTest.tip = "Mostra um ícone de teste por 5 segundos."
+    bTest:SetScript("OnClick", function() _G.SlashCmdList.MVAT("test") end)
+    local bClose = Button("Fechar", 80, 25)
+    bClose:SetPoint("BOTTOMRIGHT", -16, 10); bClose.optKey = "close"
+    bClose:SetScript("OnClick", function() f:Hide() end)
+
+    f:SetScript("OnShow", function()
+        f:ClearAllPoints()
+        local p = DB and DB.optPos
+        if p then f:SetPoint(p[1], UIParent, p[2], p[3], p[4])
+        else f:SetPoint("CENTER", UIParent, "CENTER", 0, 0) end
+        Refresh()
+    end)
+
+    function extra.toggleOptions()
+        if f:IsShown() then f:Hide() else f:Show() end
+    end
+
+    -- entrada em Esc > Opcoes > AddOns (nao quebra se a API nao existir)
+    function extra.registerSettings()
+        pcall(function()
+            local panel = CreateFrame("Frame")
+            panel.name = "MVAT"
+            local b = Button("Abrir opções do MVAT", 180, 26)
+            b:SetParent(panel); b:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, -16)
+            b:SetScript("OnClick", function()
+                if _G.HideUIPanel and _G.SettingsPanel then pcall(_G.HideUIPanel, _G.SettingsPanel) end
+                extra.toggleOptions()
+            end)
+            if _G.Settings and _G.Settings.RegisterCanvasLayoutCategory then
+                local cat = _G.Settings.RegisterCanvasLayoutCategory(panel, "MVAT")
+                _G.Settings.RegisterAddOnCategory(cat)
+            elseif _G.InterfaceOptions_AddCategory then
+                _G.InterfaceOptions_AddCategory(panel)
+            end
+        end)
+    end
+end
+
 local function Slash(input)
     local cmd, arg = (input or ""):lower():match("^(%S*)%s*(.-)$")
     if cmd == "unlock" or cmd == "destravar" then
         DB.locked = false; ApplyLayout(); HideSuggestion(); Msg("Destravado: arraste o icone. Use /mvat lock para travar.")
     elseif cmd == "lock" or cmd == "travar" then
         DB.locked = true; ApplyLayout(); hud:Hide(); Msg("Travado e posicao salva.")
-    elseif cmd == "" then
-        DB.locked = not DB.locked; ApplyLayout()
-        if DB.locked then hud:Hide() else HideSuggestion() end
-        Msg(DB.locked and "Travado." or "Destravado: arraste o icone.")
-        Msg("Comandos: lock | unlock | scale <0.5-3> | aoe <n> | combat | text | test | reset | on | off")
+    elseif cmd == "" or cmd == "opcoes" or cmd == "options" or cmd == "config" or cmd == "menu" then
+        extra.toggleOptions()
     elseif cmd == "scale" or cmd == "escala" then
         local v = tonumber(arg)
         if v and v >= 0.5 and v <= 3 then DB.scale = v; ApplyLayout(); Msg("Escala: " .. v)
@@ -2512,7 +2753,7 @@ local function Slash(input)
         Msg("Ultimo erro capturado: " .. (lastError and tostring(lastError) or "nenhum"))
         lastError = nil -- o proximo diag mostra so erros novos
     else
-        Msg("Comandos: lock | unlock | scale <0.5-3> | aoe <n> | combat | text | barra | selo | limpar | casts | test | reset | on | off | debug | diag")
+        Msg("Digite /mvat sem nada para abrir a janela de opcoes. Atalhos: lock | unlock | scale | aoe | combat | text | barra | selo | limpar | casts | test | reset | on | off | debug | diag")
     end
 end
 

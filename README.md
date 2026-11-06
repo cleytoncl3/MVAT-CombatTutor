@@ -51,11 +51,25 @@ recomendada para o momento: emergência, interrupção, dissipar, cura, provocar
 **Dica:** ative as placas de nome de inimigos (tecla **V**) — o addon usa elas para contar quantos
 mobs estão em combate e ativar as sugestões de área/farm.
 
+## Janela de opções
+
+Digite **`/mvat`** (ou `/tutor`) para abrir a janela de opções, ou use **Esc → Opções → AddOns → MVAT**.
+O visual segue o do Leatrix: painel escuro com pergaminho, duas colunas, dica ao passar o mouse sobre
+cada opção, rodapé com botões. Arraste pelo painel para mover (a posição é lembrada); **Esc** fecha.
+
+- **Geral:** addon ativo, mostrar só em combate, mostrar o motivo, só habilidades da barra, travar posição.
+- **Painéis:** LIMPAR (debuffs do grupo) e casts de chefes e elites.
+- **Paladino:** botão que troca o selo (automático ou fixo; só os selos que você tem).
+- **Tamanho:** sliders de tamanho do ícone/painéis (50% a 300%) e de inimigos para o modo área.
+- **Rodapé:** Restaurar padrão, Testar ícone e Fechar.
+
+Os comandos abaixo continuam funcionando como atalhos.
+
 ## Comandos de chat (`/mvat` ou `/tutor`)
 
 | Comando | Efeito |
 |---|---|
-| `/mvat` | Alterna travar/destravar a âncora e lista os comandos |
+| `/mvat` | Abre/fecha a janela de opções (também: `/mvat opcoes`, `config`, `menu`) |
 | `/mvat unlock` | Destrava: arraste o ícone com o botão esquerdo |
 | `/mvat lock` | Trava e salva a posição |
 | `/mvat scale 1.5` | Tamanho do ícone (0.5 a 3) |
