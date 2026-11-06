@@ -60,7 +60,7 @@ cada opção, rodapé com botões. Arraste pelo painel para mover (a posição �
 - **Geral:** addon ativo, mostrar só em combate, mostrar o motivo, só habilidades da barra, travar posição.
 - **Painéis:** LIMPAR (debuffs do grupo) e casts de chefes e elites.
 - **Paladino:** botão que troca o selo (automático ou fixo; só os selos que você tem).
-- **Tamanho:** sliders de tamanho do ícone/painéis (50% a 300%) e de inimigos para o modo área.
+- **Tamanho:** sliders de tamanho do ícone/painéis (50% a 300%), de inimigos para o modo área e do **texto abaixo do ícone** (8 a 32, independente do ícone).
 - **Rodapé:** Restaurar padrão, Testar ícone e Fechar.
 
 Os comandos abaixo continuam funcionando como atalhos.

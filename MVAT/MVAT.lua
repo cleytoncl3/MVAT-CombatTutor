@@ -25,6 +25,7 @@ local ADDON_NAME = ...
 local DEFAULTS = {
     point = "CENTER", relPoint = "CENTER", x = 0, y = -180,
     scale = 1.0,
+    textSize = 12,       -- tamanho da letra do texto abaixo do icone (independente da escala)
     locked = true,
     enabled = true,
     combatOnly = false,  -- true = so mostra em combate
@@ -1703,6 +1704,9 @@ local function ApplyLayout()
     for _, f in ipairs(hud.panels or {}) do f:SetScale(DB.scale) end
     hud:EnableMouse(not DB.locked)          -- travado = clique atravessa o HUD
     hud.mover:SetShown(not DB.locked)
+    local ts = tonumber(DB.textSize) or 12
+    hud.reason:SetFont(STANDARD_TEXT_FONT, ts, "OUTLINE")
+    hud.reason:SetWidth(math.max(260, 22 * ts))   -- texto maior precisa de linha mais larga
     hud.reason:SetShown(DB.showText)
 end
 
@@ -2402,7 +2406,7 @@ local function Msg(text) print("|cff33ccffMVAT|r " .. text) end
 -- rodape com botoes, posicao lembrada e Esc fecha. So usa fontes e texturas nativas do jogo
 -- (nenhum template), entao funciona igual com ElvUI/EllesmereUI.
 do
-    local W, H = 470, 340
+    local W, H = 470, 385
     local f = CreateFrame("Frame", "MVAT_Options", UIParent)
     f:SetSize(W, H)
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
@@ -2583,6 +2587,8 @@ do
         function() return DB.scale end, function(v) DB.scale = v; ApplyLayout() end, Pct)
     Slide(250, -266, "Inimigos p/ modo área", "A partir de quantos inimigos o addon passa a sugerir habilidades de área (farm).", "aoe", 2, 10, 1,
         function() return DB.aoe end, function(v) DB.aoe = math.floor(v + 0.5) end, Int)
+    Slide(36, -312, "Texto do motivo", "Tamanho da letra do texto abaixo do ícone. Não muda o tamanho do ícone.", "textSize", 8, 32, 1,
+        function() return DB.textSize end, function(v) DB.textSize = math.floor(v + 0.5); ApplyLayout() end, Int)
 
     ---------------------------------------------------------------- rodape
     local close = Button("X", 30, 30)
