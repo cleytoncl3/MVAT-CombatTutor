@@ -64,6 +64,8 @@ mobs estão em combate e ativar as sugestões de área/farm.
 | `/mvat text` | Liga/desliga o texto explicativo abaixo do ícone |
 | `/mvat barra` | Liga/desliga "só sugerir habilidades que estão nas suas barras" (padrão: ligado) |
 | `/mvat selo <nome>` | Paladino: fixa um selo (`retidao`, `furia`, `cruzado`, `comando`, `luz`, `sabedoria`, `justica`) ou volta ao `auto` |
+| `/mvat limpar` | Liga/desliga o painel LIMPAR (debuffs do grupo que você remove) |
+| `/mvat casts` | Liga/desliga o painel de casts de outros inimigos (chefe, elites) |
 | `/mvat test` | Mostra um ícone de teste por 5 segundos |
 | `/mvat reset` | Restaura posição e opções padrão |
 | `/mvat on` / `/mvat off` | Ativa / desativa o addon |
@@ -170,7 +172,36 @@ Seta Sombria, Marca → Picada → Tiro Arcano, Foco Interior → cura grande et
 Se o cliente enviar `ENCOUNTER_WARNING` (o sistema que o DBM/BigWigs usam em Midnight), o MVAT mostra
 o texto, o ícone e a severidade do aviso. `/mvat diag` informa se esse evento existe no seu cliente.
 
+### Casts de outros inimigos (chefe, elites, quem mira em você)
+
+O painel de cast principal olha o seu **alvo**. Como o DBM faz no Forever, o MVAT também escuta o cast
+de qualquer inimigo (nameplates e `boss1-5`) e mostra, acima do painel principal, nome e ícone da
+magia (valores secretos: só exibição) e o **alvo do cast**. Elite e chefe aparecem sempre; mob comum só
+aparece quando o cast é **em você**. Se o cast em você não for interrompível, aparece o ícone da sua
+defesa. O painel some quando o cast termina ou é interrompido. `/mvat casts` liga/desliga.
+
+### LIMPAR: debuffs do grupo que você remove
+
+Painel à esquerda do ícone principal, com você e o grupo/raide (até 4 linhas): quem está afetado, o
+nome e o ícone do debuff e **a(s) sua(s) habilidade(s) de limpeza com a tecla**. Funciona em combate
+com o filtro nativo `HARMFUL|RAID_PLAYER_DISPELLABLE` (o mesmo que ElvUI e EllesmereUI usam): o jogo
+diz "este debuff você consegue remover" sem revelar o tipo. Quando o tipo está oculto e a sua classe
+remove mais de um tipo, o painel mostra uma habilidade por tipo (no máximo 2). Jogadores fora de
+alcance de dispel (`UnitInRange`) são ignorados. Classes sem dispel (Guerreiro, Ladino, Caçador,
+Bruxo) não mostram o painel. `/mvat limpar` liga/desliga.
+
+| Classe | Remove |
+|---|---|
+| Paladino | Veneno, Doença, Magia (Purificar / Expurgar) |
+| Sacerdote | Magia (Dissipar), Doença (Abolir/Curar Doença) |
+| Mago | Maldição (Remover Maldição Menor) |
+| Xamã | Veneno, Doença (Curar Veneno / Doença) |
+| Druida | Maldição, Veneno (Remover Maldição, Abolir/Curar Veneno) |
+
 ## Limitações conhecidas
+
+- O painel LIMPAR depende de o cliente aceitar o filtro `RAID_PLAYER_DISPELLABLE`; `/mvat diag` mostra
+  quantas leituras e quantos debuffs removíveis foram vistos, e o último erro.
 
 - Habilidades de **pet** (Bloqueio de Feitiço do Caçador de Vil, Intimidação) não são sugeridas.
 - O addon não sabe se você está **atrás** do alvo; Apunhalar/Retalhar só aparecem via proc.

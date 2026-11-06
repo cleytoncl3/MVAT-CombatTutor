@@ -32,6 +32,8 @@ local DEFAULTS = {
     showText = true,     -- mostra o motivo da sugestao abaixo do icone
     barOnly = true,      -- so sugere habilidades que estao nas suas barras de acao
     seal = "auto",       -- Paladino: "auto" escolhe o selo pelo contexto; ou fixe um selo
+    purge = true,        -- painel "LIMPAR": debuffs do grupo que a sua classe consegue remover
+    ecasts = true,       -- painel de casts de OUTROS inimigos (chefe, elites, quem mira em voce)
 }
 
 local DB -- preenchido no ADDON_LOADED
@@ -1864,6 +1866,283 @@ local function CastTick()
 end
 
 ---------------------------------------------------------------------------
+-- 9b2. CASTS DE OUTROS INIMIGOS + LIMPEZA DO GRUPO (mesmas tecnicas do DBM/ElvUI no Forever)
+---------------------------------------------------------------------------
+-- (a) O DBM do Forever escuta o cast de QUALQUER inimigo (nameplates / boss), nao so do
+--     alvo, e mostra nome e icone passando o spellID (secreto) direto para
+--     C_Spell.GetSpellName / GetSpellTexture. Aqui fazemos o mesmo, sem nunca comparar.
+-- (b) O ElvUI/EllesmereUI descobrem "esse debuff eu consigo limpar" com o filtro nativo
+--     HARMFUL|RAID_PLAYER_DISPELLABLE (a lista de auras que passa no filtro e um dado
+--     LIMPO, mesmo em combate). Aqui varremos voce e o grupo com esse filtro.
+local extra = { purgeScans = 0, purgeHits = 0, purgeErr = nil, ecasts = 0, ecastErr = nil }
+
+do  -- (a) casts de outros inimigos
+    local MAXR = 3
+    local panel = CreateFrame("Frame", "MVAT_EnemyCasts", UIParent)
+    panel:SetSize(1, 1); panel:SetFrameStrata("HIGH")
+    panel:SetPoint("BOTTOM", cast, "TOP", 0, 34)
+    panel:Hide()
+    hud.panels[#hud.panels + 1] = panel
+    local rows = {}
+    for i = 1, MAXR do
+        local r = CreateFrame("Frame", nil, panel)
+        r:SetSize(300, 26)
+        r:SetPoint("TOP", panel, "TOP", 0, -(i - 1) * 30)
+        r.border = r:CreateTexture(nil, "BACKGROUND")
+        r.border:SetPoint("TOPLEFT", r, "TOPLEFT", -2, 2); r.border:SetSize(28, 28)
+        r.border:SetColorTexture(1, 0.3, 0.1, 0.9)
+        r.icon = r:CreateTexture(nil, "ARTWORK")
+        r.icon:SetSize(24, 24); r.icon:SetPoint("LEFT", r, "LEFT", 0, 0); r.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        r.nm = r:CreateFontString(nil, "OVERLAY")
+        r.nm:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
+        r.nm:SetPoint("LEFT", r.icon, "RIGHT", 6, 5); r.nm:SetWidth(190); r.nm:SetJustifyH("LEFT")
+        r.who = r:CreateFontString(nil, "OVERLAY")
+        r.who:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE")
+        r.who:SetPoint("LEFT", r.icon, "RIGHT", 6, -7); r.who:SetWidth(190); r.who:SetJustifyH("LEFT")
+        r.def = CreateFrame("Frame", nil, r)
+        r.def:SetSize(24, 24); r.def:SetPoint("RIGHT", r, "RIGHT", 0, 0)
+        r.def.icon = r.def:CreateTexture(nil, "ARTWORK")
+        r.def.icon:SetAllPoints(); r.def.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        r.def.key = r.def:CreateFontString(nil, "OVERLAY")
+        r.def.key:SetFont(STANDARD_TEXT_FONT, 11, "THICKOUTLINE"); r.def.key:SetPoint("BOTTOMRIGHT", -1, 1)
+        r.def:Hide(); r:Hide()
+        r.unit, r.expires = false, 0
+        rows[i] = r
+    end
+
+    local function Free(r) r.unit = false; r.expires = 0; r:Hide() end
+
+    local function Start(unit, spellID)
+        if not DB.ecasts then return end
+        local friendly = _G.UnitCanAttack("player", unit)
+        if not issecret(friendly) and not friendly then return end   -- so inimigos
+        if UnitIsUnit(unit, "target") then return end                 -- o alvo ja tem o painel principal
+        local cls = _G.UnitClassification(unit)
+        local strong = unit:find("^boss") ~= nil
+            or issecret(cls) or cls == "elite" or cls == "rareelite" or cls == "worldboss"
+        local row
+        for _, r in ipairs(rows) do if r.unit == unit then row = r; break end end
+        if not row then for _, r in ipairs(rows) do if not r.unit then row = r; break end end end
+        if not row then
+            row = rows[1]
+            for _, r in ipairs(rows) do if r.expires < row.expires then row = r end end
+        end
+        row.unit, row.expires = unit, GetTime() + 8   -- os eventos STOP/INTERRUPTED liberam antes
+        extra.ecasts = extra.ecasts + 1
+        local gsn, gst = C_Spell and C_Spell.GetSpellName, C_Spell and C_Spell.GetSpellTexture
+        local cname, ctex = ReadCast(unit)
+        pcall(row.nm.SetText, row.nm, (gsn and spellID ~= nil and gsn(spellID)) or cname or "?")
+        pcall(row.icon.SetTexture, row.icon, (gst and spellID ~= nil and gst(spellID)) or ctex or 134400)
+        row.nm:SetTextColor(strong and 1 or 0.9, strong and 0.55 or 0.9, strong and 0.2 or 0.9)
+        -- alvo do cast (nome e classe sao secretos: so exibicao)
+        row.who:SetText("")
+        if _G.UnitSpellTargetName then
+            pcall(function()
+                local tn = _G.UnitSpellTargetName(unit)
+                if type(tn) == "nil" then return end
+                local cc = _G.UnitSpellTargetClass and C_ClassColor and C_ClassColor.GetClassColor(_G.UnitSpellTargetClass(unit))
+                row.who:SetText("-> " .. (cc and cc:WrapTextInColorCode(tn) or tn))
+            end)
+        end
+        -- defesa: aparece so se o cast e EM VOCE e nao e interrompivel (secretos)
+        local defKey = FirstReady(DEFENSES[playerClass])
+        local atMe = PlayerIsSpellTarget and PlayerIsSpellTarget(unit)
+        local _, _, notInt = ReadCast(unit)
+        row.def:Hide()
+        if defKey and type(atMe) ~= "nil" then
+            row.def.icon:SetTexture(ICON[defKey] or 134400)
+            row.def.key:SetText(GetKeybind(defKey))
+            local ev = C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean
+            local ok = ev and pcall(function() row.def:SetAlpha(ev(atMe, ev(notInt, 1, 0), 0)) end)
+            if not ok then SetAlphaFromBool(row.def, atMe, 1, 0) end
+            row.def:Show()
+        end
+        -- mob comum so aparece quando mira em voce; elite/chefe aparece sempre
+        row:SetAlpha(1)
+        if not strong and type(atMe) ~= "nil" then SetAlphaFromBool(row, atMe, 1, 0) end
+        row:Show()
+    end
+
+    local ev = CreateFrame("Frame")
+    ev:SetScript("OnEvent", function(_, event, unit, _, spellID)
+        if type(unit) ~= "string" or not DB or not DB.enabled then return end
+        if not (unit:find("^nameplate%d") or unit:find("^boss%d") or unit == "focus") then return end
+        if event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_CHANNEL_START" then
+            local ok, err = pcall(Start, unit, spellID)
+            if not ok then extra.ecastErr = err end
+        else
+            for _, r in ipairs(rows) do if r.unit == unit then Free(r) end end
+        end
+    end)
+    function extra.registerCasts(valid)
+        for _, e in ipairs({ "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_STOP",
+                             "UNIT_SPELLCAST_CHANNEL_STOP", "UNIT_SPELLCAST_INTERRUPTED", "UNIT_SPELLCAST_FAILED" }) do
+            if valid(e) then pcall(ev.RegisterEvent, ev, e) end
+        end
+    end
+    function extra.castsTick()
+        local any, now = false, GetTime()
+        for _, r in ipairs(rows) do
+            if r.unit and now > r.expires then Free(r) end
+            if r.unit then any = true end
+        end
+        panel:SetShown(any)
+    end
+    function extra.castsHide() panel:Hide(); for _, r in ipairs(rows) do Free(r) end end
+end
+
+do  -- (b) debuffs do grupo que a sua classe remove
+    -- por tipo de debuff -> habilidades (a primeira conhecida e na barra vale)
+    local PURGE = {
+        PALADIN = { Poison = { "CLEANSE", "PURIFY" }, Disease = { "CLEANSE", "PURIFY" }, Magic = { "CLEANSE" } },
+        PRIEST  = { Magic = { "DISPEL_MAGIC" }, Disease = { "ABOLISH_DISEASE", "CURE_DISEASE_P" } },
+        MAGE    = { Curse = { "REMOVE_LESSER_CURSE" } },
+        SHAMAN  = { Poison = { "CURE_POISON_S" }, Disease = { "CURE_DISEASE_S" } },
+        DRUID   = { Curse = { "REMOVE_CURSE" }, Poison = { "ABOLISH_POISON", "CURE_POISON_D" } },
+    }
+    local MAXR = 4
+    local panel = CreateFrame("Frame", "MVAT_Purge", UIParent)
+    panel:SetSize(1, 1); panel:SetFrameStrata("HIGH")
+    panel:SetPoint("TOPRIGHT", hud, "TOPLEFT", -16, 0)
+    panel:Hide()
+    hud.panels[#hud.panels + 1] = panel
+    panel.title = panel:CreateFontString(nil, "OVERLAY")
+    panel.title:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE"); panel.title:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, 0)
+    panel.title:SetText("LIMPAR"); panel.title:SetTextColor(0.3, 1, 0.5)
+    local rows = {}
+    local function MakeIcon(parent, size)
+        local f = CreateFrame("Frame", nil, parent)
+        f:SetSize(size, size)
+        f.icon = f:CreateTexture(nil, "ARTWORK"); f.icon:SetAllPoints(); f.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        f.key = f:CreateFontString(nil, "OVERLAY")
+        f.key:SetFont(STANDARD_TEXT_FONT, 11, "THICKOUTLINE"); f.key:SetPoint("BOTTOMRIGHT", -1, 1)
+        return f
+    end
+    for i = 1, MAXR do
+        local r = CreateFrame("Frame", nil, panel)
+        r:SetSize(330, 28)
+        r:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, -14 - (i - 1) * 31)
+        r.dbf = MakeIcon(r, 22); r.dbf:SetPoint("RIGHT", r, "RIGHT", 0, 0)
+        r.what = r:CreateFontString(nil, "OVERLAY")
+        r.what:SetFont(STANDARD_TEXT_FONT, 11, "OUTLINE")
+        r.what:SetPoint("RIGHT", r.dbf, "LEFT", -5, 0); r.what:SetWidth(110); r.what:SetJustifyH("RIGHT")
+        r.who = r:CreateFontString(nil, "OVERLAY")
+        r.who:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
+        r.who:SetPoint("RIGHT", r.what, "LEFT", -6, 0); r.who:SetWidth(90); r.who:SetJustifyH("RIGHT")
+        r.sp2 = MakeIcon(r, 26); r.sp2:SetPoint("RIGHT", r.who, "LEFT", -6, 0)
+        r.sp1 = MakeIcon(r, 26); r.sp1:SetPoint("RIGHT", r.sp2, "LEFT", -4, 0)
+        r.bd = r:CreateTexture(nil, "BACKGROUND")
+        r.bd:SetPoint("TOPLEFT", r.sp1, "TOPLEFT", -2, 2); r.bd:SetPoint("BOTTOMRIGHT", r.dbf, "BOTTOMRIGHT", 2, -2)
+        r.bd:SetColorTexture(0, 0, 0, 0.45)
+        r:Hide()
+        rows[i] = r
+    end
+
+    local function UsableKey(k) return Known(k) and OnBar(N[k]) end
+
+    -- habilidades que servem para este debuff. Tipo desconhecido (secreto em combate):
+    -- mostra uma habilidade por tipo que a sua classe remove (no maximo 2).
+    local function Spells(typeName)
+        local t = PURGE[playerClass]
+        local out, seen = {}, {}
+        if not t then return out end
+        local function add(list)
+            for _, k in ipairs(list or {}) do
+                if UsableKey(k) then
+                    if not seen[k] then seen[k] = true; out[#out + 1] = k end
+                    return
+                end
+            end
+        end
+        if typeName then add(t[typeName])
+        else for _, tn in ipairs({ "Magic", "Curse", "Poison", "Disease" }) do add(t[tn]) end end
+        return out
+    end
+
+    -- true = tem debuff que eu removo (+ dados da aura), false = limpo, nil = API indisponivel
+    local function Scan(unit)
+        local slots = C_UnitAuras and C_UnitAuras.GetAuraSlots
+        if not slots then return nil end
+        extra.purgeScans = extra.purgeScans + 1
+        local ok, _, s1 = pcall(slots, unit, "HARMFUL|RAID_PLAYER_DISPELLABLE", 1)
+        if not ok then extra.purgeErr = _; return nil end
+        if type(s1) == "nil" then return false end
+        local ok2, a = pcall(C_UnitAuras.GetAuraDataBySlot, unit, s1)
+        return true, (ok2 and type(a) == "table") and a or nil
+    end
+
+    local units, last = {}, 0
+    local function Group()
+        wipe(units); units[1] = "player"
+        if _G.IsInRaid and _G.IsInRaid() then
+            for i = 1, math.min(40, (_G.GetNumGroupMembers and _G.GetNumGroupMembers()) or 0) do units[#units + 1] = "raid" .. i end
+        elseif _G.GetNumSubgroupMembers and _G.GetNumSubgroupMembers() > 0 then
+            for i = 1, 4 do units[#units + 1] = "party" .. i end
+        end
+        return units
+    end
+
+    function extra.purgeTick()
+        if not DB.purge or not PURGE[playerClass] or UnitIsDeadOrGhost("player") then panel:Hide(); return end
+        local now = GetTime()
+        if now - last < 0.3 then return end
+        last = now
+        local n = 0
+        for idx, unit in ipairs(Group()) do
+            if n >= MAXR then break end
+            if UnitExists(unit) and not UnitIsDeadOrGhost(unit) and not (idx > 1 and UnitIsUnit(unit, "player")) then
+                local inRange = true
+                if unit ~= "player" and _G.UnitInRange then
+                    local okr, v = pcall(_G.UnitInRange, unit)
+                    if okr and not issecret(v) and v == false then inRange = false end
+                end
+                if inRange then
+                    local found, aura = Scan(unit)
+                    if found then
+                        n = n + 1
+                        extra.purgeHits = extra.purgeHits + 1
+                        local r = rows[n]
+                        local nm = Pub(UnitName(unit))
+                        local _, token = UnitClass(unit)
+                        local col = RAID_CLASS_COLORS and Pub(token) and RAID_CLASS_COLORS[token]
+                        r.who:SetText(nm or unit)
+                        if col then r.who:SetTextColor(col.r, col.g, col.b) else r.who:SetTextColor(1, 1, 1) end
+                        if aura then
+                            pcall(r.what.SetText, r.what, aura.name)
+                            pcall(r.dbf.icon.SetTexture, r.dbf.icon, aura.icon)
+                            r.dbf:Show()
+                        else
+                            r.what:SetText("debuff"); r.dbf:Hide()
+                        end
+                        r.what:SetTextColor(1, 0.45, 0.45)
+                        local typeName = aura and Pub(aura.dispelName)
+                        local list = Spells(type(typeName) == "string" and typeName or nil)
+                        for s = 1, 2 do
+                            local f, k = r["sp" .. s], list[s]
+                            if k then
+                                f.icon:SetTexture(ICON[k] or 134400); f.key:SetText(GetKeybind(k)); f:Show()
+                            else f:Hide() end
+                        end
+                        r:Show()
+                    end
+                end
+            end
+        end
+        for i = n + 1, MAXR do rows[i]:Hide() end
+        panel:SetShown(n > 0)
+    end
+    function extra.purgeHide() panel:Hide() end
+end
+
+function extra.tick()
+    local ok, err = pcall(extra.castsTick)
+    if not ok then extra.ecastErr = err end
+    ok, err = pcall(extra.purgeTick)
+    if not ok then extra.purgeErr = err end
+end
+function extra.hide() extra.castsHide(); extra.purgeHide() end
+
+---------------------------------------------------------------------------
 -- 9c. AVISO DE ENCONTRO (ENCOUNTER_WARNING) - so se o cliente enviar
 ---------------------------------------------------------------------------
 -- E o sistema que o DBM/BigWigs usam em Midnight: texto, icone e severidade do
@@ -1990,7 +2269,7 @@ end
 -- esconde o icone neste ciclo em vez de gerar erro de Lua a cada 0,1s.
 local lastError
 local function Update()
-    if not DB or not DB.enabled then hud:Hide(); cast:Hide(); banner:Hide(); return end
+    if not DB or not DB.enabled then hud:Hide(); cast:Hide(); banner:Hide(); extra.hide(); return end
     if GetTime() < testUntil then return end
     local ok, err = pcall(DoUpdate)
     if not ok then
@@ -2000,6 +2279,7 @@ local function Update()
     -- painel de cast e aviso de encontro sao independentes: um erro num nao derruba o outro
     local ok2, err2 = pcall(CastTick)
     if not ok2 then lastError = err2; cast:Hide() end
+    extra.tick()      -- casts de outros inimigos + painel LIMPAR (cada um com o seu pcall)
     BannerTick()
 end
 
@@ -2058,6 +2338,8 @@ core:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
                              "UNIT_SPELLCAST_CHANNEL_STOP", "UNIT_SPELLCAST_INTERRUPTED" }) do
             if EventValid(e) then core:RegisterUnitEvent(e, "target") end
         end
+        -- casts de qualquer inimigo (nameplates / chefe), como o DBM faz
+        extra.registerCasts(EventValid)
         -- os SEUS casts (alimentam os combos "usei A -> use B")
         if EventValid("UNIT_SPELLCAST_SUCCEEDED") then core:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player") end
         -- sistema de encontro da Blizzard (aviso do chefe): so se o cliente o enviar
@@ -2158,6 +2440,13 @@ local function Slash(input)
             Msg(want == "auto" and "Selo AUTOMATICO: o addon escolhe pelo alvo, arma e escudo."
                 or ("Selo fixado em " .. (N[want] or arg) .. "."))
         end
+    elseif cmd == "limpar" or cmd == "purge" then
+        DB.purge = not DB.purge
+        Msg(DB.purge and "Painel LIMPAR ligado: mostra quem no grupo tem debuff que voce remove."
+            or "Painel LIMPAR desligado.")
+    elseif cmd == "casts" then
+        DB.ecasts = not DB.ecasts
+        Msg(DB.ecasts and "Painel de casts de outros inimigos ligado." or "Painel de casts de outros inimigos desligado.")
     elseif cmd == "barra" or cmd == "bar" then
         DB.barOnly = not DB.barOnly
         Msg(DB.barOnly and ("So sugere habilidades que estao nas suas barras (" .. barCount .. " encontradas).")
@@ -2211,6 +2500,10 @@ local function Slash(input)
         else
             Msg("Painel de cast: nenhum cast de inimigo visto (teste com um mob que lance feitico)")
         end
+        Msg("Casts de outros inimigos: " .. extra.ecasts .. " vistos | erro: " .. tostring(extra.ecastErr or "nenhum"))
+        Msg("LIMPAR grupo: " .. extra.purgeScans .. " leituras | " .. extra.purgeHits .. " debuffs removiveis vistos"
+            .. " | filtro nativo " .. ((C_UnitAuras and C_UnitAuras.GetAuraSlots) and "existe" or "|cffff5555nao existe|r")
+            .. " | erro: " .. tostring(extra.purgeErr or "nenhum"))
         Msg("Seus casts: " .. castSeen .. " eventos, " .. castReadable .. " legiveis | combos por sequencia "
             .. (castReadable > 0 and "|cff55ff55ATIVOS|r" or "|cffff5555sem dados|r"))
         Msg("Encontro: ENCOUNTER_WARNING " .. (encState.valid and "existe" or "nao existe")
@@ -2219,7 +2512,7 @@ local function Slash(input)
         Msg("Ultimo erro capturado: " .. (lastError and tostring(lastError) or "nenhum"))
         lastError = nil -- o proximo diag mostra so erros novos
     else
-        Msg("Comandos: lock | unlock | scale <0.5-3> | aoe <n> | combat | text | barra | selo | test | reset | on | off | debug | diag")
+        Msg("Comandos: lock | unlock | scale <0.5-3> | aoe <n> | combat | text | barra | selo | limpar | casts | test | reset | on | off | debug | diag")
     end
 end
 
