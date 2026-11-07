@@ -51,6 +51,25 @@ recomendada para o momento: emergência, interrupção, dissipar, cura, provocar
 **Dica:** ative as placas de nome de inimigos (tecla **V**) — o addon usa elas para contar quantos
 mobs estão em combate e ativar as sugestões de área/farm.
 
+## Atualizar sem baixar ZIP toda hora (Windows)
+
+Dentro da pasta do addon vem o arquivo **`Atualizar MVAT.bat`**. **Duplo clique** nele:
+
+1. acha a pasta do WoW Forever sozinho (ou pergunta uma vez e lembra);
+2. compara a versão instalada com a do GitHub (`## Version` no `MVAT.toc`);
+3. se houver versão nova, baixa e atualiza a pasta do addon (as configurações ficam salvas);
+4. mostra **"Pronto! ... digite /reload no jogo"**.
+
+**Primeira instalação:** baixe o ZIP do repositório (Code → Download ZIP), abra a pasta `MVAT` de dentro
+dele e dê duplo clique em `Atualizar MVAT.bat`. Ele instala no jogo para você. Depois é só repetir
+quando quiser atualizar. Para reinstalar mesmo na mesma versão: `Atualizar MVAT.bat force` no terminal.
+
+- O Windows pode mostrar o aviso azul "SmartScreen" na primeira vez (arquivo baixado da internet): clique em
+  **Mais informações → Executar assim mesmo**. O arquivo é texto simples e pode ser lido antes.
+- Precisa de internet e do repositório público. O código do atualizador está dentro do próprio `.bat`.
+- **Aviso dentro do jogo:** os addons trocam o número da versão entre amigos no grupo/raide/guilda. Se
+  alguém tiver uma versão mais nova que a sua, aparece uma mensagem pedindo para rodar o atualizador.
+
 ## Janela de opções
 
 Digite **`/mvat`** (ou `/tutor`) para abrir a janela de opções, ou use **Esc → Opções → AddOns → MVAT**.

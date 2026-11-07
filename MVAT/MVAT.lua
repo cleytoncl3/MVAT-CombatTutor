@@ -2758,6 +2758,35 @@ core:SetScript("OnUpdate", function(_, dt)
     end
 end)
 
+-- VERSAO: o addon troca o numero da versao com amigos no grupo/guilda (mensagem de addon, sem
+-- internet). Se alguem tem uma mais nova, avisa uma vez para rodar o "Atualizar MVAT.bat".
+function extra.version()
+    local f = (C_AddOns and C_AddOns.GetAddOnMetadata) or _G.GetAddOnMetadata
+    local ok, v = pcall(f, ADDON_NAME, "Version")
+    return (ok and type(v) == "string" and v ~= "") and v or "0"
+end
+function extra.vnum(v)
+    local a, b, c = tostring(v):match("^(%d+)%.?(%d*)%.?(%d*)")
+    return (tonumber(a) or 0) * 1000000 + (tonumber(b) or 0) * 1000 + (tonumber(c) or 0)
+end
+function extra.announceVersion()
+    if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then return end
+    if GetTime() - (extra.lastAnnounce or -99) < 30 then return end
+    extra.lastAnnounce = GetTime()
+    local ch = (_G.IsInRaid and _G.IsInRaid() and "RAID") or (_G.IsInGroup and _G.IsInGroup() and "PARTY")
+        or (_G.IsInGuild and _G.IsInGuild() and "GUILD") or nil
+    if ch then pcall(C_ChatInfo.SendAddonMessage, "MVAT", "V:" .. extra.version(), ch) end
+end
+function extra.onAddonMsg(prefix, msg)
+    if prefix ~= "MVAT" or type(msg) ~= "string" or issecret(msg) then return end
+    local v = msg:match("^V:([%d%.]+)$")
+    if v and extra.vnum(v) > extra.vnum(extra.version()) and not extra.warned then
+        extra.warned = true
+        print("|cff33ccffMVAT|r Seu MVAT esta desatualizado (" .. extra.version() .. "): um amigo tem a versao " .. v
+            .. ". Rode |cffffff00Atualizar MVAT.bat|r (na pasta do addon) e depois |cffffff00/reload|r.")
+    end
+end
+
 local function RefreshSpells()
     ResolveNames()
     ScanSpellbook()
@@ -2815,6 +2844,11 @@ core:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         end
         extra.registerSettings()
         extra.minimapUpdate()
+        -- aviso de versao nova entre amigos
+        if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then pcall(C_ChatInfo.RegisterAddonMessagePrefix, "MVAT") end
+        for _, e in ipairs({ "CHAT_MSG_ADDON", "GROUP_ROSTER_UPDATE", "PLAYER_ENTERING_WORLD" }) do
+            if EventValid(e) then pcall(core.RegisterEvent, core, e) end
+        end
         print("|cff33ccffMVAT|r carregado para " .. (UnitClass("player")) .. ". Digite |cffffff00/mvat|r para abrir as opcoes.")
     elseif event == "SPELLS_CHANGED" or event == "LEARNED_SPELL_IN_TAB" or event == "PLAYER_LEVEL_UP"
         or event == "CHARACTER_POINTS_CHANGED" then
@@ -2839,6 +2873,10 @@ core:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
             OnPlayerCast(arg3)
             elapsed = UPDATE_INTERVAL
         end
+    elseif event == "CHAT_MSG_ADDON" then
+        pcall(extra.onAddonMsg, arg1, arg2)
+    elseif event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_ENTERING_WORLD" then
+        if not UnitAffectingCombat("player") then pcall(extra.announceVersion) end
     elseif event == "ENCOUNTER_WARNING" then
         local ok, err = pcall(ShowEncounterWarning, arg1)
         if not ok then lastError = err end
@@ -2894,7 +2932,7 @@ extra.buildOptions = function()
     mt:SetPoint("TOPLEFT", 16, -16); mt:SetText("MVAT - Tutor de Combate")
     local sub = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     sub:SetPoint("TOPLEFT", mt, "BOTTOMLEFT", 0, -6)
-    sub:SetText("Só mostra o que usar. Nunca joga por você.")
+    sub:SetText("Só mostra o que usar. Nunca joga por você.   |cff888888v" .. extra.version() .. "|r")
 
     ---------------------------------------------------------------- helpers
     local controls = {}
@@ -3366,8 +3404,8 @@ local function Slash(input)
     elseif cmd == "debug" then
         local count = 0
         for _, rule in ipairs(rules) do for _, k in ipairs(rule.pick) do if Known(k) then count = count + 1 end end end
-        Msg(string.format("Classe %s | %d regras | %d habilidades aprendidas usadas | inimigos %s",
-            tostring(playerClass), #rules, count, tostring(c.enemies)))
+        Msg(string.format("MVAT v%s | Classe %s | %d regras | %d habilidades aprendidas usadas | inimigos %s",
+            extra.version(), tostring(playerClass), #rules, count, tostring(c.enemies)))
         Msg(string.format("Barras: %d habilidades (filtro %s) | arma: %s, %.1fs | escudo: %s",
             barCount, DB.barOnly and "LIGADO" or "desligado", gear.twoHand and "duas maos" or "uma mao", gear.speed,
             gear.shield and "sim" or "nao"))
