@@ -35,6 +35,9 @@ local DEFAULTS = {
     seal = "auto",       -- Paladino: "auto" escolhe o selo pelo contexto; ou fixe um selo
     purge = true,        -- painel "LIMPAR": debuffs do grupo que a sua classe consegue remover
     ecasts = true,       -- painel de casts de OUTROS inimigos (chefe, elites, quem mira em voce)
+    pos = false,         -- posicoes salvas dos paineis de aviso: DB.pos[id] = { x, y }
+    minimap = true,      -- botao do addon na borda do minimapa
+    minimapAngle = 215,  -- posicao do botao em volta do minimapa (graus)
 }
 
 local DB -- preenchido no ADDON_LOADED
@@ -1704,6 +1707,13 @@ local function ApplyLayout()
     for _, f in ipairs(hud.panels or {}) do f:SetScale(DB.scale) end
     hud:EnableMouse(not DB.locked)          -- travado = clique atravessa o HUD
     hud.mover:SetShown(not DB.locked)
+    -- destravado: o icone vai para a frente (nao fica atras da janela de opcoes) e os
+    -- paineis de aviso ganham seus retangulos azuis para arrastar
+    hud:SetFrameStrata(DB.locked and "HIGH" or "FULLSCREEN_DIALOG")
+    if not DB.locked then hud:SetFrameLevel(40) end
+    for _, m in ipairs(hud.movers or {}) do hud.place(m) end
+    if hud.lockBar then hud.lockBar:SetShown(not DB.locked) end
+    _G.MVAT_ApplyLayout = ApplyLayout   -- usado pelo botao "Travar posicoes"
     local ts = tonumber(DB.textSize) or 12
     hud.reason:SetFont(STANDARD_TEXT_FONT, ts, "OUTLINE")
     hud.reason:SetWidth(math.max(260, 22 * ts))   -- texto maior precisa de linha mais larga
@@ -1724,12 +1734,83 @@ end
 -- sua habilidade existe e esta fora de recarga (isActive).
 -- Filhos de UIParent (nao do HUD): continuam visiveis mesmo se o icone principal estiver oculto.
 hud.panels = {}
+
+-- MOVEDORES: cada painel de aviso tem um retangulo azul proprio, arrastavel quando o addon
+-- esta destravado, com posicao salva (DB.pos[id]). O painel sempre se ancora no movedor.
+-- Sem posicao salva, o movedor fica no lugar padrao, relativo ao icone principal.
+hud.movers = {}
+function hud.place(m)
+    m:ClearAllPoints()
+    local p = DB.pos and DB.pos[m.id]
+    if p then
+        m:SetPoint("CENTER", UIParent, "CENTER", p[1], p[2])
+    else
+        local s = DB.scale or 1
+        m:SetPoint(m.point, m.relTo, m.relPoint, m.dx * s, m.dy * s)
+    end
+    m.panel:ClearAllPoints()
+    m.panel:SetPoint(m.point, m, m.point, 0, 0)
+    m:SetShown(not DB.locked)
+    m:EnableMouse(not DB.locked)
+end
+function hud.addMover(id, label, w, h, panel, point, relTo, relPoint, dx, dy)
+    local m = CreateFrame("Frame", "MVAT_Mover_" .. id, UIParent)
+    m:SetSize(w, h)
+    m:SetFrameStrata("FULLSCREEN_DIALOG"); m:SetFrameLevel(40)   -- acima da janela de opcoes
+    m:SetClampedToScreen(true); m:SetMovable(true); m:RegisterForDrag("LeftButton")
+    m:Hide()
+    m.tex = m:CreateTexture(nil, "BACKGROUND")
+    m.tex:SetAllPoints(); m.tex:SetColorTexture(0, 0.6, 1, 0.4)
+    m.fs = m:CreateFontString(nil, "OVERLAY")
+    m.fs:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE"); m.fs:SetPoint("CENTER"); m.fs:SetText(label)
+    m.id, m.panel, m.point, m.relTo, m.relPoint, m.dx, m.dy = id, panel, point, relTo, relPoint, dx, dy
+    m:SetScript("OnDragStart", function(self) if not DB.locked then self:StartMoving() end end)
+    m:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local cx, cy = self:GetCenter()
+        local ux, uy = UIParent:GetCenter()
+        DB.pos = DB.pos or {}
+        DB.pos[self.id] = { cx - ux, cy - uy }
+        hud.place(self)
+    end)
+    hud.movers[#hud.movers + 1] = m
+    return m
+end
+
+-- Barra do "modo mover": aparece no topo da tela enquanto estiver destravado, com o botao de travar.
+hud.lockBar = CreateFrame("Frame", "MVAT_LockBar", UIParent)
+do
+    local b = hud.lockBar
+    b:SetSize(420, 34); b:SetPoint("TOP", UIParent, "TOP", 0, -60)
+    b:SetFrameStrata("FULLSCREEN_DIALOG"); b:SetFrameLevel(60)
+    b:Hide()
+    b.bg = b:CreateTexture(nil, "BACKGROUND"); b.bg:SetAllPoints(); b.bg:SetColorTexture(0, 0, 0, 0.8)
+    b.edge = b:CreateTexture(nil, "BORDER")
+    b.edge:SetPoint("TOPLEFT", -1, 1); b.edge:SetPoint("BOTTOMRIGHT", 1, -1); b.edge:SetColorTexture(0, 0.6, 1, 0.9)
+    b.bg:SetDrawLayer("ARTWORK")
+    b.text = b:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    b.text:SetPoint("LEFT", 10, 0); b.text:SetText("MVAT: arraste o ícone e os retângulos azuis")
+    b.btn = CreateFrame("Button", nil, b)
+    b.btn:SetSize(130, 24); b.btn:SetPoint("RIGHT", -6, 0)
+    b.btn.bg = b.btn:CreateTexture(nil, "BACKGROUND"); b.btn.bg:SetAllPoints(); b.btn.bg:SetColorTexture(0.1, 0.35, 0.15, 1)
+    b.btn.hl = b.btn:CreateTexture(nil, "HIGHLIGHT"); b.btn.hl:SetAllPoints(); b.btn.hl:SetColorTexture(1, 1, 1, 0.2)
+    b.btn.label = b.btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    b.btn.label:SetPoint("CENTER"); b.btn.label:SetText("Travar posições")
+    b.btn:SetScript("OnClick", function()
+        DB.locked = true
+        _G.MVAT_ApplyLayout()
+        hud:Hide()
+        print("|cff33ccffMVAT|r Posições travadas e salvas.")
+    end)
+end
+
 local cast = CreateFrame("Frame", "MVAT_CastPanel", UIParent)
 cast:SetSize(1, 1)
 cast:SetFrameStrata("HIGH")
 cast:SetPoint("BOTTOM", hud, "TOP", 0, 26)
 cast:Hide()
 hud.panels[#hud.panels + 1] = cast
+hud.addMover("cast", "AVISO DE CAST (interromper / defesa)", 220, 40, cast, "CENTER", hud, "TOP", 0, 26)
 
 local function MakeSlot(size)
     local f = CreateFrame("Frame", nil, cast)
@@ -1887,11 +1968,12 @@ do  -- (a) casts de outros inimigos
     panel:SetPoint("BOTTOM", cast, "TOP", 0, 34)
     panel:Hide()
     hud.panels[#hud.panels + 1] = panel
+    hud.addMover("ecast", "CASTS DE INIMIGOS (chefes/elites)", 300, 26, panel, "BOTTOM", hud, "TOP", 0, 70)
     local rows = {}
     for i = 1, MAXR do
         local r = CreateFrame("Frame", nil, panel)
         r:SetSize(300, 26)
-        r:SetPoint("TOP", panel, "TOP", 0, -(i - 1) * 30)
+        r:SetPoint("BOTTOM", panel, "BOTTOM", 0, (i - 1) * 30)   -- empilha para CIMA (nao cobre o painel de cast)
         r.border = r:CreateTexture(nil, "BACKGROUND")
         r.border:SetPoint("TOPLEFT", r, "TOPLEFT", -2, 2); r.border:SetSize(28, 28)
         r.border:SetColorTexture(1, 0.3, 0.1, 0.9)
@@ -2010,6 +2092,7 @@ do  -- (b) debuffs do grupo que a sua classe remove
     panel:SetPoint("TOPRIGHT", hud, "TOPLEFT", -16, 0)
     panel:Hide()
     hud.panels[#hud.panels + 1] = panel
+    hud.addMover("purge", "LIMPAR (grupo)", 330, 18, panel, "TOPRIGHT", hud, "TOPLEFT", -16, 0)
     panel.title = panel:CreateFontString(nil, "OVERLAY")
     panel.title:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE"); panel.title:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, 0)
     panel.title:SetText("LIMPAR"); panel.title:SetTextColor(0.3, 1, 0.5)
@@ -2158,6 +2241,7 @@ banner:SetFrameStrata("HIGH")
 banner:SetPoint("TOP", hud, "BOTTOM", 0, -44)
 banner:Hide()
 hud.panels[#hud.panels + 1] = banner
+hud.addMover("banner", "AVISO DO CHEFE", 280, 36, banner, "TOP", hud, "BOTTOM", 0, -44)
 banner.icon = banner:CreateTexture(nil, "ARTWORK")
 banner.icon:SetSize(30, 30); banner.icon:SetPoint("RIGHT", banner, "CENTER", -4, 0)
 banner.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
@@ -2358,6 +2442,7 @@ core:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
             end
         end
         extra.registerSettings()
+        extra.minimapUpdate()
         print("|cff33ccffMVAT|r carregado para " .. (UnitClass("player")) .. ". Digite |cffffff00/mvat|r para abrir as opcoes.")
     elseif event == "SPELLS_CHANGED" or event == "LEARNED_SPELL_IN_TAB" or event == "PLAYER_LEVEL_UP"
         or event == "CHARACTER_POINTS_CHANGED" then
@@ -2406,7 +2491,7 @@ local function Msg(text) print("|cff33ccffMVAT|r " .. text) end
 -- rodape com botoes, posicao lembrada e Esc fecha. So usa fontes e texturas nativas do jogo
 -- (nenhum template), entao funciona igual com ElvUI/EllesmereUI.
 do
-    local W, H = 470, 385
+    local W, H = 470, 415
     local f = CreateFrame("Frame", "MVAT_Options", UIParent)
     f:SetSize(W, H)
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
@@ -2546,7 +2631,7 @@ do
         function() return DB.showText end, function(v) DB.showText = v; ApplyLayout() end)
     Check(16, -158, "Só habilidades da barra", "Só sugere o que está em alguma das suas barras de ação.|n|nDesligado, sugere tudo que você já aprendeu.", "barOnly",
         function() return DB.barOnly end, function(v) DB.barOnly = v end)
-    Check(16, -180, "Travar posição do ícone", "Destravado, o ícone aparece para você arrastar até onde quiser.|n|nTravado, o clique atravessa o ícone.", "locked",
+    Check(16, -180, "Travar posição do ícone", "Desmarque para MOVER: o ícone e cada painel de aviso (cast, chefe, LIMPAR) ganham um retângulo azul para arrastar com o botão esquerdo. Depois marque de novo para travar.|n|nTravado, o clique atravessa tudo.", "locked",
         function() return DB.locked end,
         function(v) DB.locked = v; ApplyLayout(); if v then hud:Hide() else HideSuggestion() end end)
 
@@ -2556,12 +2641,14 @@ do
         function() return DB.purge end, function(v) DB.purge = v end)
     Check(225, -114, "Casts de chefes e elites", "Mostra o que os outros inimigos (não só o alvo) estão castando e em quem.", "ecasts",
         function() return DB.ecasts end, function(v) DB.ecasts = v end)
+    Check(225, -136, "Botão no minimapa", "Mostra o ícone do MVAT na borda do minimapa.|n|nClique abre estas opções; arraste para mover em volta do minimapa.", "minimap",
+        function() return DB.minimap end, function(v) DB.minimap = v; extra.minimapUpdate() end)
 
     if select(2, UnitClass("player")) == "PALADIN" then   -- playerClass so existe depois do login
-        Heading("Paladino", 225, -150)
+        Heading("Paladino", 225, -172)
         local SEALS = { "auto", "furia", "retidao", "cruzado", "comando", "luz", "sabedoria", "justica" }
         local sb = Button("", 200, 24)
-        sb:SetPoint("TOPLEFT", f, "TOPLEFT", 225, -172)
+        sb:SetPoint("TOPLEFT", f, "TOPLEFT", 225, -194)
         sb.tip, sb.optKey = "Clique para trocar o selo.|n|nAutomático: o addon escolhe pela sua arma, escudo e mana.|n|nSó aparecem os selos que você já aprendeu.", "seal"
         sb:SetScript("OnClick", function()
             local idx = 1
@@ -2582,12 +2669,19 @@ do
     end
 
     ---------------------------------------------------------------- tamanhos
-    Heading("Tamanho", 16, -222)
-    Slide(36, -266, "Ícone e painéis", "Arraste para mudar o tamanho do ícone e de todos os painéis.", "scale", 0.5, 3, 0.1,
+    local bMove = Button("Mover ícone e painéis", 190, 22)
+    bMove:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -212); bMove.optKey = "move"
+    bMove.tip = "Destrava e fecha esta janela. Arraste o ícone e cada painel de aviso (retângulos azuis) para onde quiser.|n|nUse o botão \"Travar posições\" no topo da tela quando terminar."
+    bMove:SetScript("OnClick", function()
+        DB.locked = false; ApplyLayout(); HideSuggestion(); f:Hide()
+    end)
+
+    Heading("Tamanho", 16, -250)
+    Slide(36, -294,"Ícone e painéis", "Arraste para mudar o tamanho do ícone e de todos os painéis.", "scale", 0.5, 3, 0.1,
         function() return DB.scale end, function(v) DB.scale = v; ApplyLayout() end, Pct)
-    Slide(250, -266, "Inimigos p/ modo área", "A partir de quantos inimigos o addon passa a sugerir habilidades de área (farm).", "aoe", 2, 10, 1,
+    Slide(250, -294,"Inimigos p/ modo área", "A partir de quantos inimigos o addon passa a sugerir habilidades de área (farm).", "aoe", 2, 10, 1,
         function() return DB.aoe end, function(v) DB.aoe = math.floor(v + 0.5) end, Int)
-    Slide(36, -312, "Texto do motivo", "Tamanho da letra do texto abaixo do ícone. Não muda o tamanho do ícone.", "textSize", 8, 32, 1,
+    Slide(36, -340, "Texto do motivo", "Tamanho da letra do texto abaixo do ícone. Não muda o tamanho do ícone.", "textSize", 8, 32, 1,
         function() return DB.textSize end, function(v) DB.textSize = math.floor(v + 0.5); ApplyLayout() end, Int)
 
     ---------------------------------------------------------------- rodape
@@ -2640,6 +2734,83 @@ do
                 _G.InterfaceOptions_AddCategory(panel)
             end
         end)
+    end
+end
+
+---------------------------------------------------------------------------
+-- 12. BOTAO NO MINIMAPA (clique abre as opcoes; arraste para contornar o minimapa)
+---------------------------------------------------------------------------
+do
+    local mm = _G.Minimap
+    local btn
+    local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
+
+    local function Place()
+        if not (btn and DB) then return end
+        local a = math.rad(DB.minimapAngle or 215)
+        local w = (mm:GetWidth() or 140) / 2 + 5
+        local x, y = math.cos(a) * w, math.sin(a) * w
+        -- minimapa quadrado (ElvUI etc.): encosta o botao na borda do quadrado
+        local shape = _G.GetMinimapShape and _G.GetMinimapShape() or "ROUND"
+        if shape == "SQUARE" then
+            local m = math.max(math.abs(x), math.abs(y))
+            if m > 0 then x, y = x / m * w, y / m * w end
+        end
+        btn:ClearAllPoints()
+        btn:SetPoint("CENTER", mm, "CENTER", x, y)
+    end
+
+    local function Drag()
+        local mx, my = mm:GetCenter()
+        local cx, cy = _G.GetCursorPosition()
+        local s = mm:GetEffectiveScale()
+        DB.minimapAngle = math.deg(atan2(cy / s - my, cx / s - mx)) % 360
+        Place()
+    end
+
+    if mm then
+        btn = CreateFrame("Button", "MVAT_MinimapButton", mm)
+        btn:SetSize(31, 31)
+        btn:SetFrameStrata("MEDIUM"); btn:SetFrameLevel((mm:GetFrameLevel() or 1) + 8)
+        btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        btn:RegisterForDrag("LeftButton")
+        local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints(); hl:SetTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+        local back = btn:CreateTexture(nil, "BACKGROUND")
+        back:SetSize(24, 24); back:SetPoint("TOPLEFT", 4, -4); back:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+        btn.icon = btn:CreateTexture(nil, "ARTWORK")
+        btn.icon:SetSize(19, 19); btn.icon:SetPoint("CENTER", 0, 0)
+        btn.icon:SetTexture("Interface\\Icons\\INV_Misc_Eye_02"); btn.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        local ring = btn:CreateTexture(nil, "OVERLAY")
+        ring:SetSize(53, 53); ring:SetPoint("TOPLEFT", 0, 0); ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+        btn:SetScript("OnClick", function(_, mouse)
+            if mouse == "RightButton" then
+                DB.enabled = not DB.enabled
+                if not DB.enabled then hud:Hide() end
+                Msg(DB.enabled and "MVAT ativado." or "MVAT desativado.")
+            else
+                extra.toggleOptions()
+            end
+        end)
+        btn:SetScript("OnDragStart", function(self) self:SetScript("OnUpdate", Drag) end)
+        btn:SetScript("OnDragStop", function(self) self:SetScript("OnUpdate", nil) end)
+        btn:SetScript("OnEnter", function(self)
+            if _G.GameTooltip then
+                _G.GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+                _G.GameTooltip:SetText("MVAT - Tutor de Combate", 1, 0.82, 0)
+                _G.GameTooltip:AddLine("Clique: abrir as opções", 1, 1, 1)
+                _G.GameTooltip:AddLine("Botão direito: ligar/desligar o addon", 1, 1, 1)
+                _G.GameTooltip:AddLine("Arraste: mover em volta do minimapa", 0.7, 0.7, 0.7)
+                _G.GameTooltip:Show()
+            end
+        end)
+        btn:SetScript("OnLeave", function() if _G.GameTooltip then _G.GameTooltip:Hide() end end)
+        btn:Hide()
+    end
+
+    function extra.minimapUpdate()
+        if not btn or not DB then return end
+        if DB.minimap then Place(); btn:Show() else btn:Hide() end
     end
 end
 

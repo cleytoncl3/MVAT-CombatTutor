@@ -62,6 +62,17 @@ cada opção, rodapé com botões. Arraste pelo painel para mover (a posição �
 - **Paladino:** botão que troca o selo (automático ou fixo; só os selos que você tem).
 - **Tamanho:** sliders de tamanho do ícone/painéis (50% a 300%), de inimigos para o modo área e do **texto abaixo do ícone** (8 a 32, independente do ícone).
 - **Rodapé:** Restaurar padrão, Testar ícone e Fechar.
+- **Botão no minimapa:** liga/desliga o ícone do MVAT na borda do minimapa (clique abre as opções, botão direito liga/desliga o addon, arraste para contornar o minimapa; funciona com minimapa quadrado).
+
+### Mover o ícone e os painéis
+
+Clique em **Mover ícone e painéis** (ou desmarque "Travar posição do ícone"). A janela fecha e aparecem:
+
+- o **ícone principal** (arraste com o botão esquerdo);
+- um **retângulo azul para cada painel de aviso**: *aviso de cast* (interromper/defesa), *casts de inimigos*, *LIMPAR* e *aviso do chefe*. Cada um é arrastado e salvo **separadamente**;
+- uma **barra no topo da tela** com o botão **Travar posições** para terminar.
+
+"Restaurar padrão" devolve tudo ao lugar original.
 
 Os comandos abaixo continuam funcionando como atalhos.
 
