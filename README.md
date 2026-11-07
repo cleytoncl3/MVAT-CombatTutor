@@ -76,6 +76,64 @@ Clique em **Mover ícone e painéis** (ou desmarque "Travar posição do ícone"
 
 Os comandos abaixo continuam funcionando como atalhos.
 
+## Modo tutor: papéis, combinações e ajuda em combate
+
+Feito para quem está aprendendo: o addon diz **o que usar agora**, **o que vem depois** e **por quê**.
+
+### Papel (dano / tank / cura)
+
+Em **Sacerdote, Paladino, Xamã, Druida e Guerreiro** o addon mostra só o que serve ao seu papel. O
+papel é detectado pelos **pontos de talento** (Druida Feral: Urso = tank, Gato = dano) ou escolhido na
+janela (`/mvat` → "Sua classe" → *Papel*) ou por `/mvat papel auto|dano|tank|cura`.
+
+| Papel | O que aparece |
+|---|---|
+| **Cura** | curas de recarga e HoTs, **manter o HoT no alvo amigo** (Renovar, Rejuvenescimento, Lifebloom, Riptide), limpar debuff do grupo, buffs, ajuda ao grupo quando o chefe castar. Sem habilidades de dano. |
+| **Tank** | postura/forma/selo de tank, ameaça, provocar (Rugido/Righteous Defense/Provocar), defesas grandes (Templar's Bulwark, Muralha de Escudo, Pele de Árvore…). |
+| **Dano** | rotação e combos. Sem curas de aliado. |
+
+Mago, Ladino, Caçador e Bruxo são só dano e não têm escolha de papel.
+
+### Opções por classe (janela `/mvat` → "Sua classe")
+
+Paladino: papel, selo e aura · Sacerdote, Druida, Guerreiro: papel · Xamã: papel e escudo (Raio/Água) ·
+Mago: armadura e magia principal · Bruxo: maldição de utilidade · Caçador: aspecto · Ladino: abertura.
+
+### DEPOIS (próximos passos)
+
+Ao lado do ícone aparecem até 2 ícones pequenos **DEPOIS**: as próximas habilidades também disponíveis
+agora. É a combinação em ordem (usa A, depois B). Desligue em "Mostrar próximos passos".
+
+### Limpar debuff no ícone principal
+
+O painel LIMPAR mostra quem do grupo tem debuff; além disso o **ícone principal** passa a sugerir
+**"Limpar <nome>"** com a sua habilidade de dispel (funciona em combate, pelo filtro nativo
+`RAID_PLAYER_DISPELLABLE`; o jogo esconde o tipo do debuff em combate, então o addon sugere a sua
+habilidade de limpeza disponível para aquele alvo).
+
+### Cast de chefe: o que fazer
+
+Quando um chefe/elite casta, o painel mostra o que o jogo libera (nome, ícone, alvo do cast) e **uma
+dica por papel**:
+
+- **Dano:** "Interrompa se puder. Em você? use a defesa." (ícones de interromper e defesa)
+- **Tank:** defesa de **tank** no lugar da defesa pessoal.
+- **Cura:** ícone **GRUPO** (cura em grupo: Prayer of Healing, Chain Heal, Wild Growth, Holy Shock…)
+  que aparece quando o cast **não** é em você, e a defesa pessoal quando é. Funciona também com o
+  chefe sem estar no seu alvo (a linha "casts de outros inimigos" lê `boss1-5` e as nameplates).
+
+> Limite do jogo: o Forever esconde a vida do grupo e o nome/tipo do feitiço em combate. O addon
+> **mostra** esses dados (alfa dos ícones), mas não consegue decidir por eles. Por isso a cura em
+> combate é guiada por recarga e HoT no alvo, e não por "quem está com menos vida".
+
+### Fontes usadas para montar as regras
+
+Guias e notas do WoW Forever (set–nov/2026): Warcraft Tavern (classes e páginas de cada classe,
+atualizado em 3 nov), Games.gg (novas habilidades por classe), notas dos próprios addons do Forever
+(WhatsTraining, TalentsForeverBook, ForeverAuras). As habilidades de talento novas (Riptide, Wild
+Growth, Templar's Bulwark, Mangle de urso, Lifebloom) só são reconhecidas se o ID do Classic/TBC
+bater com o do Forever; `/mvat spells` lista o que está no seu grimório sem regra para eu acrescentar.
+
 ## Comandos de chat (`/mvat` ou `/tutor`)
 
 | Comando | Efeito |
@@ -89,6 +147,8 @@ Os comandos abaixo continuam funcionando como atalhos.
 | `/mvat text` | Liga/desliga o texto explicativo abaixo do ícone |
 | `/mvat barra` | Liga/desliga "só sugerir habilidades que estão nas suas barras" (padrão: ligado) |
 | `/mvat selo <nome>` | Paladino: fixa um selo (`retidao`, `furia`, `cruzado`, `comando`, `luz`, `sabedoria`, `justica`) ou volta ao `auto` |
+| `/mvat papel <auto\|dano\|tank\|cura>` | Escolhe o seu papel (Sacerdote, Paladino, Xamã, Druida, Guerreiro) |
+| `/mvat spells` | Lista as habilidades do seu grimório que o addon ainda não conhece |
 | `/mvat limpar` | Liga/desliga o painel LIMPAR (debuffs do grupo que você remove) |
 | `/mvat casts` | Liga/desliga o painel de casts de outros inimigos (chefe, elites) |
 | `/mvat test` | Mostra um ícone de teste por 5 segundos |

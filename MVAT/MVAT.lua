@@ -36,6 +36,9 @@ local DEFAULTS = {
     purge = true,        -- painel "LIMPAR": debuffs do grupo que a sua classe consegue remover
     ecasts = true,       -- painel de casts de OUTROS inimigos (chefe, elites, quem mira em voce)
     pos = false,         -- posicoes salvas dos paineis de aviso: DB.pos[id] = { x, y }
+    roles = false,       -- papel por classe: DB.roles[CLASSE] = "auto" | "dps" | "tank" | "heal"
+    opts = false,        -- preferencias por classe: DB.opts[CLASSE][chave] = valor
+    queue = true,        -- mostra "DEPOIS": as proximas habilidades disponiveis ao lado do icone
     minimap = true,      -- botao do addon na borda do minimapa
     minimapAngle = 215,  -- posicao do botao em volta do minimapa (graus)
 }
@@ -189,6 +192,11 @@ end
 -- Todas as habilidades usadas pelas regras. O nome e resolvido via ID, entao
 -- qualquer rank aprendido conta (o addon compara pelo nome localizado).
 local ID = {
+    -- extras de papeis/opcoes (IDs do Classic/TBC; so valem se o Forever os mantiver - senao ficam inativos)
+    ASPECT_CHEETAH = 5118, ASPECT_BEAST = 13161, ASPECT_PACK = 13159,
+    MOLTEN_ARMOR = 30482, WATER_SHIELD = 24398, CONC_AURA = 19746, SANCT_AURA = 20218, FIRE_RES_AURA = 19891,
+    RIGHTEOUS_DEFENSE = 31789, POWER_INFUSION = 10060, RIPTIDE = 61295, WILD_GROWTH = 48438, MANGLE = 33878,
+    DEFENSIVE_STANCE = 71, LIFEBLOOM = 33763,
     -- Guerreiro
     PUMMEL = 6552, SHIELD_BASH = 72, SHIELD_WALL = 871, LAST_STAND = 12975, SHIELD_BLOCK = 2565,
     EXECUTE = 5308, OVERPOWER = 7384, REVENGE = 6572, BATTLE_SHOUT = 6673, SUNDER = 7386,
@@ -1078,6 +1086,101 @@ local function Hit(cat, pick, when, msg)
 end
 
 ---------------------------------------------------------------------------
+-- 6b. PAPEIS (dano / tank / cura) E OPCOES POR CLASSE
+---------------------------------------------------------------------------
+-- Papel = o que voce faz no grupo. Fica "auto" (detectado pelos pontos de talento) ou escolhido
+-- na janela de opcoes (/mvat). Em cada papel o addon mostra so o que faz sentido:
+--   cura: HoTs/curas de recarga, limpar debuff do grupo, buffs  (sem habilidades de dano)
+--   tank: ameaca, provocar, defesas, selo/postura/forma de tank
+--   dano: rotacao e combos (sem curas de aliado)
+-- Classes so de dano (Mago, Ladino, Cacador, Bruxo) nao filtram nada.
+local extra = { purgeScans = 0, purgeHits = 0, purgeErr = nil, ecasts = 0, ecastErr = nil, purgeFound = nil, purgeAt = 0 }
+local RL = {}
+-- papel de cada arvore de talentos (1,2,3). "feral" = tank se estiver de urso, senao dano.
+RL.TABS = {
+    PRIEST = { "heal", "heal", "dps" }, PALADIN = { "heal", "tank", "dps" },
+    SHAMAN = { "dps", "dps", "heal" }, DRUID = { "dps", "feral", "heal" }, WARRIOR = { "dps", "dps", "tank" },
+}
+
+function RL.detect()
+    RL.detected = nil
+    local map = RL.TABS[select(2, UnitClass("player"))]
+    if not map or not _G.GetTalentTabInfo then return end
+    local best, bestPts, total = nil, -1, 0
+    for tab = 1, 3 do
+        local ok, _, _, a, _, b = pcall(_G.GetTalentTabInfo, tab)   -- Classic: nome, icone, pontos
+        local pts = ok and ((type(a) == "number" and a) or (type(b) == "number" and b)) or nil
+        if pts then
+            total = total + pts
+            if pts > bestPts then best, bestPts = tab, pts end
+        end
+    end
+    if total > 0 and best then RL.detected = map[best] end
+end
+
+-- papel efetivo: escolhido por voce > detectado > nil (nao filtra nada)
+function RL.role()
+    local cls = select(2, UnitClass("player"))
+    if not RL.TABS[cls] then return nil end
+    local r = DB and DB.roles and DB.roles[cls]
+    if r and r ~= "auto" then return r end
+    local d = RL.detected
+    if d == "feral" then return InForm("BEAR", "DIRE_BEAR") and "tank" or "dps" end
+    return d
+end
+
+function RL.allow(rule, role)
+    if not role or rule.proc then return true end
+    local tag = rule.role
+    if tag then
+        if type(tag) == "table" then return tag[role] == true end
+        return tag == role
+    end
+    local cat = rule.cat
+    if role == "heal" then return cat ~= "ROTATION" and cat ~= "AOE" and cat ~= "COMBO" end
+    return cat ~= "HEAL"      -- dano e tank nao recebem sugestao de cura de aliado
+end
+
+-- marca uma regra para um papel ("heal", "tank", "dps" ou { tank = true, dps = true })
+local function Role(role, rule) rule.role = role; return rule end
+
+-- opcao por classe (DB.opts[CLASSE][chave]); "auto"/vazio = padrao
+function RL.opt(key, default)
+    local o = DB and DB.opts and DB.opts[select(2, UnitClass("player"))]
+    local v = o and o[key]
+    if v == nil or v == "auto" then return default end
+    return v
+end
+
+-- alvo selecionado e amigo? (curas "no alvo")
+function RL.friend()
+    return UnitExists("target") and Is(_G.UnitIsFriend and _G.UnitIsFriend("player", "target"))
+end
+
+-- HoT/buff MEU no alvo amigo esta faltando? Auras legiveis: exato. Em combate (auras
+-- secretas): pelo tempo desde o MEU ultimo cast nele (zera ao trocar de alvo).
+function RL.hotMissing(key, dur)
+    if not N[key] then return false end
+    local has = UnitHasAura("target", key, "HELPFUL")
+    if has ~= nil then return has == false end
+    local t = lastCast.at[key]
+    return t == nil or (GetTime() - t) > dur
+end
+
+-- limpar debuff de quem esta mais a mao (usa a varredura do painel LIMPAR: funciona em combate)
+function RL.purgeRule()
+    return R("DISPEL", function()
+        local f = extra.purgeFound
+        return f and extra.purgeSpells and extra.purgeSpells(f.typeName) or {}
+    end, function() return extra.purgeFound ~= nil and GetTime() - extra.purgeAt < 1.0 end,
+    function()
+        local f = extra.purgeFound
+        return "Limpar " .. ((f and f.name) or "aliado") .. ": tem um debuff que voce remove"
+    end,
+    function() local f = extra.purgeFound; return f and f.unit end)
+end
+
+---------------------------------------------------------------------------
 -- 7. REGRAS POR CLASSE
 ---------------------------------------------------------------------------
 local CLASS_RULES = {}
@@ -1091,6 +1194,8 @@ CLASS_RULES.WARRIOR = function()
         Interrupt({ "PUMMEL", "SHIELD_BASH" }),
         BigCastDefense("SHIELD_BLOCK"),
         Taunt("TAUNT", tank),
+        Role("tank", R("BUFF", "DEFENSIVE_STANCE", function(c) return not tank() end,
+            "Papel tank: troque para a Postura Defensiva", "player")),
         SelfBuff("BATTLE_SHOUT", nil, true),
         Hit("COMBO", "CHARGE", function(c) return not c.inCombat end, "Abertura: Investida"),
         Hit("COMBO", "VICTORY_RUSH", nil, "Vitoria Rapida: cura 10% da vida (ate 20s apos matar)"),
@@ -1123,7 +1228,13 @@ CLASS_RULES.ROGUE = function()
         Interrupt("GOUGE"),
         Hit("INTERRUPT", "KIDNEY", function(c) return c.cast and not c.cast.unknownInt and c.cp >= 1 end, "Sem Chute: Golpe nos Rins"),
         R("AOE", "BLADE_FLURRY", function(c) return c.inCombat and c.near >= 2 end, "Varios mobs: Rajada de Laminas"),
-        Hit("COMBO", function() return gear.dagger and { "AMBUSH", "CHEAP_SHOT", "GARROTE" } or { "CHEAP_SHOT", "GARROTE", "AMBUSH" } end,
+        Hit("COMBO", function()
+            local o = RL.opt("opener", nil)     -- abertura escolhida na janela
+            if o == "ambush" then return { "AMBUSH", "CHEAP_SHOT", "GARROTE" }
+            elseif o == "cheap" then return { "CHEAP_SHOT", "AMBUSH", "GARROTE" }
+            elseif o == "garrote" then return { "GARROTE", "CHEAP_SHOT", "AMBUSH" } end
+            return gear.dagger and { "AMBUSH", "CHEAP_SHOT", "GARROTE" } or { "CHEAP_SHOT", "GARROTE", "AMBUSH" }
+        end,
             function(c) return c.stealth and not c.inCombat end, "Furtivo: abertura (Emboscada exige adaga)"),
         Hit("COMBO", "RIPOSTE", nil, "Aparou! Ripostar"),
         Hit("COMBO", "SND", function(c) return c.cp >= 2 and BuffDown("SND", 24) and c.thp > 25 end,
@@ -1142,11 +1253,15 @@ end
 
 CLASS_RULES.MAGE = function()
     local function filler()
+        local o = RL.opt("spell", nil)      -- opcao: magia principal escolhida na janela
+        if o == "arcane" then return { "ARCANE_BLAST", "FROSTBOLT", "FIREBALL" }
+        elseif o == "fire" then return { "FIREBALL", "FROSTBOLT" }
+        elseif o == "frost" then return { "FROSTBOLT", "FIREBALL" } end
         if Known("ARCANE_BLAST") then return { "ARCANE_BLAST", "FROSTBOLT", "FIREBALL" } end   -- especializacao Arcana
         if Known("PYROBLAST") or Known("COMBUSTION") or not Known("FROSTBOLT") then return { "FIREBALL", "FROSTBOLT" } end
         return { "FROSTBOLT", "FIREBALL" }
     end
-    local fill = filler()
+    local fill = filler       -- funcao: reavalia a cada ciclo (respeita a opcao e o que voce aprendeu)
     return {
         Emergency("ICE_BLOCK", 20),
         R("EMERGENCY", "FROST_NOVA", function(c) return c.inCombat and c.melee and c.hp < 70 end,
@@ -1170,7 +1285,13 @@ CLASS_RULES.MAGE = function()
         Hit("ROTATION", "FIRE_BLAST", function(c) return c.thp < 30 or c.melee end, "Instantaneo: Impacto de Fogo"),
         Hit("ROTATION", fill, nil, "Dano principal"),
         SelfBuff("ARCANE_INTELLECT"),
-        SelfBuff({ "MAGE_ARMOR", "ICE_ARMOR", "FROST_ARMOR" }),
+        SelfBuff(function()
+            local o = RL.opt("armor", nil)
+            if o == "ice" then return { "ICE_ARMOR", "FROST_ARMOR" }
+            elseif o == "mage" then return { "MAGE_ARMOR" }
+            elseif o == "molten" then return { "MOLTEN_ARMOR" } end
+            return { "MAGE_ARMOR", "ICE_ARMOR", "FROST_ARMOR", "MOLTEN_ARMOR" }
+        end, { "MAGE_ARMOR", "ICE_ARMOR", "FROST_ARMOR", "MOLTEN_ARMOR" }),
     }
 end
 
@@ -1186,15 +1307,29 @@ CLASS_RULES.PRIEST = function()
         Dispel({ "ABOLISH_DISEASE", "CURE_DISEASE_P" }, { "Disease" }),
         HealLowest("PW_SHIELD", 40, canShield),
         HealLowest({ "FLASH_HEAL", "HEAL", "LESSER_HEAL" }, 40),
-        R("COMBO", { "GREATER_HEAL", "HEAL" }, function(c, u) return Buff("INNER_FOCUS") and u and c.lowestPct < 70 end,
-            "COMBO Foco Interior -> cura grande gratis", function(c) return c.lowest end),
+        Role("heal", R("COMBO", { "GREATER_HEAL", "HEAL" }, function(c, u) return Buff("INNER_FOCUS") and u and c.lowestPct < 70 end,
+            "COMBO Foco Interior -> cura grande gratis", function(c) return c.lowest end)),
         HealLowest("PENANCE", 55),
         HealLowest({ "GREATER_HEAL", "HEAL", "LESSER_HEAL" }, 60),
         HealLowest("RENEW", 85, function(c, u) return UnitLacksAura(u, "RENEW", "HELPFUL") end),
+        -- CURA com alvo amigo selecionado: mantenha Renovar (em combate pelo tempo desde o seu ultimo cast)
+        Role("heal", R("HEAL", "RENEW", function(c)
+            return RL.friend() and RL.hotMissing("RENEW", 15)
+        end, function() return "Mantenha Renovar em " .. UnitLabel("target") .. " (cura ao longo do tempo)" end, "target")),
+        Role("heal", R("HEAL", "PW_SHIELD", function(c)
+            return RL.friend() and c.inCombat and canShield(c, "target")
+        end, function() return "Escudo em " .. UnitLabel("target") .. " (absorve dano)" end, "target")),
+        -- CURA em combate (vida do grupo oculta): cooldowns do guia do Forever
+        Role("heal", R("HEAL", "PENANCE", function(c) return c.inCombat and c.grouped end,
+            "Penance (recarga 12s): cure o aliado mais ferido")),
+        Role("heal", R("COMBO", "INNER_FOCUS", function(c) return c.inCombat and c.grouped end,
+            "Prepare: Foco Interior (a proxima cura grande sai de graca)", "player")),
+        Role("heal", R("COMBO", "POWER_INFUSION", function(c) return c.inCombat and c.elite end,
+            "Elite/chefe: Poder Infundido (curas mais rapidas)", "player")),
         R("HEAL", "PRAYER_OF_MENDING", function(c) return c.grouped and c.inCombat and (not c.target or (not c.hostileSecret and not c.hostile)) end,
             "Prayer of Mending (10s): jogue no tanque ou aliado"),
         Hit("COMBO", "MIND_BLAST", function() return Buff("INNER_FOCUS") end, "COMBO Foco Interior -> Explosao Mental"),
-        SelfBuff("SHADOWFORM", nil, true),
+        Role("dps", SelfBuff("SHADOWFORM", nil, true)),
         R("AOE", "HOLY_NOVA", function(c) return c.meleeAoe and c.manaPct > 30 end, "Varios inimigos colados: Nova Sagrada"),
         Hit("ROTATION", "SWP", function(c) return DotDown("SWP", 16) and c.thp > 20 end, "Aplique Palavra Sombria: Dor"),
         Hit("ROTATION", "HOLY_FIRE", function(c) return not c.inCombat end, "Abertura: Fogo Sagrado"),
@@ -1225,7 +1360,12 @@ local paladin = {}   -- exposto para /mvat debug
 --  * O Julgamento NAO consome mais o selo (recarga 10s, alcance 10m); julgar a Furia provoca o alvo.
 --  * Golpe Sagrado: golpe base do Ret, recarga 10s (arma + dano Sagrado).
 CLASS_RULES.PALADIN = function()
-    local function tankMode() return gear.shield or Buff("RIGHTEOUS_FURY") end
+    -- modo tank: papel escolhido manda; em "auto" vale escudo equipado ou Furia Justa ativa
+    local function tankMode()
+        local r = RL.role()
+        if r == "tank" then return true elseif r == "dps" or r == "heal" then return false end
+        return gear.shield or Buff("RIGHTEOUS_FURY")
+    end
 
     -- segundos restantes do selo (auras fora de combate; rastreio por casts em combate)
     local function sealLeft()
@@ -1273,11 +1413,19 @@ CLASS_RULES.PALADIN = function()
         R("EMERGENCY", "BOP", function(c, u) return c.inCombat and u and u ~= "player" and c.lowestPct < 20 end,
             function(c) return "Salve " .. UnitLabel(c.lowest) .. ": Bencao de Protecao" end, function(c) return c.lowest end),
         Interrupt("HOJ"),
+        -- TANK (Protecao): provocar, cooldown grande e ameaca
+        Role("tank", Taunt("RIGHTEOUS_DEFENSE", function() return true end)),
+        Role("tank", R("DEFENSIVE", "TEMPLARS_BULWARK", function(c) return c.inCombat and (c.elite or c.near >= 3) end,
+            "Elite/varios mobs: Templar's Bulwark (absorve 100% da vida por 8s)", "player")),
         Dispel({ "CLEANSE", "PURIFY" }, { "Poison", "Disease" }),
         Dispel("CLEANSE", { "Magic" }),
         HealLowest("HOLY_SHOCK", 50),
         HealLowest("HOLY_LIGHT", 45),
         HealLowest("FOL", 75),
+        -- CURA (Sagrado): em combate a vida do grupo e secreta, entao guia pelas curas de recarga
+        -- e pela ordem do guia do Forever: Holy Shock -> Flash of Light / Holy Light (Infusion of Light acende como proc)
+        Role("heal", R("HEAL", "HOLY_SHOCK", function(c) return c.inCombat and c.grouped end,
+            "Holy Shock (recarga curta): use em um aliado ferido - depois Flash of Light / Holy Light")),
         -- 1) sem selo (ou acabando): aplica o melhor selo para o contexto
         R("COMBO", sealPicks, function(c)
             if not (c.hostile or c.inCombat) then return false end
@@ -1312,9 +1460,18 @@ CLASS_RULES.PALADIN = function()
         Hit("ROTATION", "HOLY_WRATH", function(c) return c.undeadOrDemon and c.enemies >= 2 end, "Varios mortos-vivos/demonios: Colera Sagrada"),
         R("BUFF", "RIGHTEOUS_FURY", function(c) return not c.inCombat and gear.shield and Lacks("RIGHTEOUS_FURY") end,
             "Escudo equipado: ative Furia Justa (ameaca de tanque)", "player"),
-        R("BUFF", function() return tankMode() and { "DEVOTION", "RET_AURA" } or { "RET_AURA", "DEVOTION" } end,
-            function(c) return not c.inCombat and Lacks("DEVOTION") and Lacks("RET_AURA") end,
-            function() return tankMode() and "Aura ausente: Devocao (tanque)" or "Aura ausente: Retribuicao (dano)" end, "player"),
+        R("BUFF", function()
+            local AURA = { devotion = "DEVOTION", retribution = "RET_AURA", concentration = "CONC_AURA", sanctity = "SANCT_AURA", fireres = "FIRE_RES_AURA" }
+            local o = AURA[RL.opt("aura", "")]
+            if o then return { o } end
+            return tankMode() and { "DEVOTION", "RET_AURA" } or { "RET_AURA", "DEVOTION" }
+        end,
+            function(c)
+                return not c.inCombat and Lacks("DEVOTION") and Lacks("RET_AURA") and Lacks("CONC_AURA")
+                    and Lacks("SANCT_AURA") and Lacks("FIRE_RES_AURA")
+            end,
+            function() return RL.opt("aura", nil) and "Aura ausente (a que voce escolheu)"
+                or (tankMode() and "Aura ausente: Devocao (tanque)" or "Aura ausente: Retribuicao (dano)") end, "player"),
         R("BUFF", { "BOK", "BOM", "BOW" }, function(c)
             return not c.inCombat and Lacks("BOK") and Lacks("BOM") and Lacks("BOW")
         end, "Bencao ausente", "player"),
@@ -1327,7 +1484,14 @@ CLASS_RULES.HUNTER = function()
         Emergency("DETERRENCE", 35, function(c) return c.melee end, "Apanhando corpo a corpo: Dissuasao"),
         R("HEAL", "MEND_PET", function(c) return c.inCombat and c.petHp < 40 end, "Pet morrendo: Curar Ajudante", "pet"),
         Hit("INTERRUPT", "SCATTER", function(c) return c.cast and c.cast.interruptible and not c.cast.unknownInt end, function(c) return "Interrompa: " .. c.cast.name end),
-        R("BUFF", "HAWK", function(c) return c.hostile and not c.melee and Lacks("HAWK") end, "Combate a distancia: Aspecto do Falcao", "player"),
+        R("BUFF", function()
+            local M = { hawk = "HAWK", monkey = "MONKEY", cheetah = "ASPECT_CHEETAH", beast = "ASPECT_BEAST", pack = "ASPECT_PACK" }
+            return { M[RL.opt("aspect", "")] or "HAWK" }
+        end, function(c)
+            local o = RL.opt("aspect", nil)
+            if not o and not (c.hostile and not c.melee) then return false end    -- auto: so a distancia
+            return Lacks("HAWK") and Lacks("MONKEY") and Lacks("ASPECT_CHEETAH") and Lacks("ASPECT_BEAST") and Lacks("ASPECT_PACK")
+        end, function() return RL.opt("aspect", nil) and "Aspecto ausente (o que voce escolheu)" or "Combate a distancia: Aspecto do Falcao" end, "player"),
         Hit("COMBO", "MONGOOSE", function(c) return c.melee end, "Alvo esquivou: Mordida do Mangusto"),
         Hit("COMBO", "COUNTERATTACK", function(c) return c.melee end, "Aparou! Contra-ataque"),
         Hit("ROTATION", "WING_CLIP", function(c) return c.melee and DotDown("WING_CLIP", 7) and not c.grouped end, "Colado: Cortar Asas e afaste-se"),
@@ -1358,8 +1522,15 @@ CLASS_RULES.WARLOCK = function()
         R("AOE", "HELLFIRE", function(c) return c.meleeAoe and c.hp > 50 end, "Mobs colados: Fogo do Inferno"),
         Hit("ROTATION", "SOUL_FIRE", function(c) return not c.inCombat and c.elite end, "Abertura em elite: Fogo da Alma (usa fragmento)"),
         Hit("ROTATION", "COA", function(c) return DotDown("COA", 22) and c.thp > 30 end, "Aplique o Bane da Agonia"),
-        Hit("ROTATION", { "COE", "COW" }, function(c) return DotDown("COE", 100) and DotDown("COW", 100) and c.thp > 30 end,
-            "Aplique uma Maldicao (separada do Bane)"),
+        Hit("ROTATION", function()
+            local o = RL.opt("curse", nil)      -- maldicao de utilidade escolhida na janela
+            if o == "elements" then return { "COE" } elseif o == "weakness" then return { "COW" }
+            elseif o == "recklessness" then return { "COR" } elseif o == "none" then return {} end
+            return { "COE", "COW" }
+        end, function(c)
+            if RL.opt("curse", nil) == "none" then return false end
+            return DotDown("COE", 100) and DotDown("COW", 100) and DotDown("COR", 100) and c.thp > 30
+        end, "Aplique uma Maldicao (separada do Bane)"),
         Hit("ROTATION", "CORRUPTION", function(c) return DotDown("CORRUPTION", 14) and c.thp > 20 end, "Aplique Corrupcao"),
         Hit("ROTATION", "SIPHON_LIFE", function(c) return DotDown("SIPHON_LIFE", 26) and c.thp > 30 end, "Aplique Dreno de Vida (cura voce)"),
         Hit("ROTATION", "IMMOLATE", function(c) return DotDown("IMMOLATE", 12) and c.thp > 30 end, "Aplique Imolar"),
@@ -1386,9 +1557,9 @@ CLASS_RULES.SHAMAN = function()
         return t ~= nil and (GetTime() - t) < 30
     end
     return {
-        R("EMERGENCY", "NS_SHAMAN", function(c) return c.inCombat and c.lowestPct < 30 end, "Emergencia: Rapidez da Natureza -> Onda Curativa"),
-        R("COMBO", "HEALING_WAVE", function(c, u) return Buff("NS_SHAMAN") and u and c.lowestPct < 60 end,
-            "COMBO Rapidez da Natureza -> Onda Curativa instantanea", function(c) return c.lowest end),
+        Role("heal", R("EMERGENCY", "NS_SHAMAN", function(c) return c.inCombat and c.lowestPct < 30 end, "Emergencia: Rapidez da Natureza -> Onda Curativa")),
+        Role("heal", R("COMBO", "HEALING_WAVE", function(c, u) return Buff("NS_SHAMAN") and u and c.lowestPct < 60 end,
+            "COMBO Rapidez da Natureza -> Onda Curativa instantanea", function(c) return c.lowest end)),
         Interrupt("EARTH_SHOCK"),
         R("DEFENSIVE", "GROUNDING", function(c) return c.cast and c.cast.onGroup end, "Feitico vindo: Totem de Aterramento"),
         Dispel("CURE_POISON_S", { "Poison" }),
@@ -1396,9 +1567,21 @@ CLASS_RULES.SHAMAN = function()
         HealLowest({ "LHW", "HEALING_WAVE" }, 40),
         HealLowest("CHAIN_HEAL", 75, function(c) return c.injured >= 3 end),
         HealLowest("HEALING_WAVE", 60),
-        Hit("DISPEL", "PURGE", function() return TargetHasMagicBuff() end, "Inimigo com buff magico: Expurgar"),
-        R("BUFF", { "WINDFURY", "FLAMETONGUE", "ROCKBITER" }, function(c) return weaponMissing() end, "Encante a arma", "player"),
-        SelfBuff("LIGHTNING_SHIELD", nil, true),
+        -- CURA (Restauracao): Riptide e HoT que potencializa a Cura em Cadeia em +25% (guia do Forever)
+        Role("heal", R("HEAL", "RIPTIDE", function(c)
+            return RL.friend() and RL.hotMissing("RIPTIDE", 12)
+        end, function() return "Riptide em " .. UnitLabel("target") .. ": HoT que potencializa a Cura em Cadeia" end, "target")),
+        Role("heal", R("HEAL", "RIPTIDE", function(c) return c.inCombat and c.grouped end,
+            "Riptide (recarga): HoT em um aliado ferido - depois Cura em Cadeia")),
+        Role("heal", R("HEAL", "CHAIN_HEAL", function(c) return c.inCombat and c.grouped and RL.friend() end,
+            "Cura em Cadeia no alvo (pula para os feridos ao lado)", "target")),
+        Role({ dps = true }, Hit("DISPEL", "PURGE", function() return TargetHasMagicBuff() end, "Inimigo com buff magico: Expurgar")),
+        Role({ dps = true }, R("BUFF", { "WINDFURY", "FLAMETONGUE", "ROCKBITER" }, function(c) return weaponMissing() end, "Encante a arma", "player")),
+        R("BUFF", function()
+            local o = RL.opt("shield", nil)
+            if o == "water" or (not o and RL.role() == "heal") then return { "WATER_SHIELD", "LIGHTNING_SHIELD" } end
+            return { "LIGHTNING_SHIELD", "WATER_SHIELD" }
+        end, function() return Lacks("LIGHTNING_SHIELD") and Lacks("WATER_SHIELD") end, "Escudo elemental ausente", "player"),
         Hit("COMBO", "CHAIN_LIGHTNING", function(c) return (Buff("SHAMAN_CLEARCAST") or Buff("ELEM_MASTERY")) and c.enemies >= 2 end, "COMBO Clarividencia -> Cadeia de Raios"),
         Hit("COMBO", "LIGHTNING_BOLT", function() return Buff("SHAMAN_CLEARCAST") or Buff("ELEM_MASTERY") end, "COMBO Clarividencia -> Raio"),
         R("COMBO", "ELEM_MASTERY", function(c) return c.hostile and c.inCombat and c.elite end, "Elite/chefe: Dominio Elemental"),
@@ -1420,9 +1603,12 @@ CLASS_RULES.DRUID = function()
     return {
         Emergency("BARKSKIN", 40),
         R("EMERGENCY", "FRENZIED", function(c) return c.inCombat and bear() and c.hp < 40 end, "Urso ferido: Regeneracao Frenetica"),
-        R("EMERGENCY", "NS_DRUID", function(c) return c.inCombat and c.lowestPct < 30 and caster() end, "Emergencia: Rapidez da Natureza -> Toque de Cura"),
-        R("COMBO", "HEALING_TOUCH", function(c, u) return Buff("NS_DRUID") and u and c.lowestPct < 60 end,
-            "COMBO Rapidez da Natureza -> Toque de Cura instantaneo", function(c) return c.lowest end),
+        Role("heal", R("EMERGENCY", "NS_DRUID", function(c) return c.inCombat and c.lowestPct < 30 and caster() end, "Emergencia: Rapidez da Natureza -> Toque de Cura")),
+        Role("heal", R("COMBO", "HEALING_TOUCH", function(c, u) return Buff("NS_DRUID") and u and c.lowestPct < 60 end,
+            "COMBO Rapidez da Natureza -> Toque de Cura instantaneo", function(c) return c.lowest end)),
+        -- TANK (Feral): precisa estar de Urso
+        Role("tank", R("BUFF", { "DIRE_BEAR", "BEAR" }, function(c) return not bear() end,
+            "Papel tank: entre na Forma de Urso", "player")),
         Interrupt({ "FERAL_CHARGE", "BASH" }),
         Dispel("REMOVE_CURSE", { "Curse" }),
         Dispel({ "ABOLISH_POISON", "CURE_POISON_D" }, { "Poison" }),
@@ -1430,11 +1616,23 @@ CLASS_RULES.DRUID = function()
         HealLowest("REGROWTH", 45, function() return caster() end),
         HealLowest("HEALING_TOUCH", 55, function() return caster() end),
         HealLowest("REJUV", 85, function(c, u) return caster() and UnitLacksAura(u, "REJUV", "HELPFUL") end),
+        -- CURA (Restauracao) com alvo amigo selecionado: HoT de base, depois cura direta (guia do Forever)
+        Role("heal", R("HEAL", "LIFEBLOOM", function() return caster() and RL.friend() and RL.hotMissing("LIFEBLOOM", 7) end,
+            function() return "Mantenha Lifebloom em " .. UnitLabel("target") .. " (HoT do tank)" end, "target")),
+        Role("heal", R("HEAL", "REJUV", function() return caster() and RL.friend() and RL.hotMissing("REJUV", 12) end,
+            function() return "Mantenha Rejuvenescimento em " .. UnitLabel("target") .. " (HoT de base)" end, "target")),
+        Role("heal", R("HEAL", "WILD_GROWTH", function(c) return c.inCombat and c.grouped and caster() end,
+            "Wild Growth (recarga): HoT em area no grupo ferido")),
+        Role("heal", R("HEAL", "SWIFTMEND", function(c) return c.inCombat and c.grouped and caster() end,
+            "Swiftmend (no Forever nao consome o HoT): cura rapida no ferido")),
+        Role("heal", R("HEAL", "REGROWTH", function(c) return c.inCombat and caster() and RL.friend() and RL.hotMissing("REGROWTH", 18) end,
+            function() return "Regrowth em " .. UnitLabel("target") .. " (cura direta + HoT)" end, "target")),
         Taunt("GROWL", bear),
         -- Urso (tank)
         Hit("COMBO", "MAUL", function() return bear() and Buff("DRUID_CLEARCAST") end, "COMBO Clarividencia -> Espancar gratis"),
         Hit("AOE", "DEMO_ROAR", function(c) return bear() and c.near >= 2 and NotOnTargetAny("DEMO_ROAR") end, "Area: Rugido Desmoralizante"),
         Hit("AOE", "SWIPE", function(c) return bear() and c.near >= 2 end, "Varios mobs: Golpe Giratorio"),
+        Hit("ROTATION", "MANGLE", function(c) return bear() end, "Mangle (urso): golpe principal de ameaca"),
         Hit("ROTATION", "LACERATE", function(c) return bear() and DotDown("LACERATE", 12) end, "Lacerar (sangramento de urso, acumula)"),
         Hit("ROTATION", "MAUL", function(c) return bear() and (not c.powerKnown or c.power >= 15) end, "Espancar"),
         -- Gato (dano)
@@ -1533,8 +1731,8 @@ local SEQUENCES = {
         { "VANISH", "SINISTER", 8, "Furtivo: abra com Golpe Sinistro", "target" },
     },
     PRIEST = {
-        { "INNER_FOCUS", { "GREATER_HEAL", "HEAL" }, 10, "Foco Interior usado: cura grande gratis" },
-        { "PW_SHIELD", "RENEW", 6, "Escudo usado: Renovar" },
+        { "INNER_FOCUS", { "GREATER_HEAL", "HEAL" }, 10, "Foco Interior usado: cura grande gratis", nil, "heal" },
+        { "PW_SHIELD", "RENEW", 6, "Escudo usado: Renovar", nil, "heal" },
     },
     PALADIN = {
         { { "SEAL_FURY", "SOC", "SOR", "SOTC", "SOL", "SOW", "SOJ" }, "JUDGEMENT", 28, "Selo ativo: Julgamento (nao gasta o selo)", "target" },
@@ -1551,10 +1749,10 @@ local SEQUENCES = {
     },
     SHAMAN = {
         { "ELEM_MASTERY", { "CHAIN_LIGHTNING", "LIGHTNING_BOLT" }, 15, "Dominio Elemental: raio forte", "target" },
-        { "NS_SHAMAN", "HEALING_WAVE", 10, "Rapidez da Natureza: Onda Curativa instantanea" },
+        { "NS_SHAMAN", "HEALING_WAVE", 10, "Rapidez da Natureza: Onda Curativa instantanea", nil, "heal" },
     },
     DRUID = {
-        { "NS_DRUID", "HEALING_TOUCH", 10, "Rapidez da Natureza: Toque de Cura instantaneo" },
+        { "NS_DRUID", "HEALING_TOUCH", 10, "Rapidez da Natureza: Toque de Cura instantaneo", nil, "heal" },
         { "FAERIE_FIRE", "MOONFIRE", 8, "Fogo Feerico usado: Fogo Lunar", "target" },
         { "MOONFIRE", "INSECT_SWARM", 8, "Fogo Lunar usado: Enxame de Insetos", "target" },
         { "INSECT_SWARM", "STARFIRE", 10, "Enxame usado: Fogo Estelar", "target" },
@@ -1565,11 +1763,13 @@ local function AfterRule(def)
     local from, to, window, msg, unit = def[1], def[2], def[3], def[4], def[5]
     local set = {}
     for _, k in ipairs(type(from) == "table" and from or { from }) do set[k] = true end
-    return R("COMBO", to, function()
+    local rule = R("COMBO", to, function()
         if not (lastCast.key and set[lastCast.key] and (GetTime() - lastCast.t) <= window) then return false end
         local d = type(to) == "string" and lastCast.dur[to]
         return not d or DotDown(to, d)
     end, msg, unit)
+    rule.role = def[6]     -- sequencias de cura so valem para o papel de cura
+    return rule
 end
 
 local function OnPlayerCast(sid)
@@ -1612,6 +1812,8 @@ local function LoadClassRules()
         if rule.cat == "COMBO" or rule.cat == "AOE" or rule.cat == "ROTATION" or rule.cat == "BUFF" then at = i; break end
     end
     table.insert(rules, at, PROC_RULE)
+    -- limpar debuff do grupo (filtro nativo, vale em combate) logo depois do proc
+    if select(2, UnitClass("player")) ~= "WARRIOR" then table.insert(rules, at + 1, RL.purgeRule()); at = at + 1 end
     for i, def in ipairs(SEQUENCES[class] or {}) do
         table.insert(rules, at + i, AfterRule(def))
     end
@@ -1624,18 +1826,22 @@ local function ResolveUnit(rule)
 end
 
 -- Retorna regra, chave escolhida e unidade da primeira sugestao valida.
-local function Evaluate()
+-- skip = { [chave] = true } exclui habilidades (usado para montar a fila "depois")
+local function Evaluate(skip)
+    local role = RL.role()
     for _, rule in ipairs(rules) do
-        if rule.proc then
-            local key = next(glowing) and GlowingProcKey()
-            if key and Ready(key) then return rule, key end
-        else
-            local unit = ResolveUnit(rule)
-            if (unit == nil and not rule.unit) or (unit and UnitExists(unit)) then
-                if not rule.when or rule.when(c, unit) then
-                    local picks = rule.pickFn and rule.pickFn(c, unit) or rule.pick
-                    for _, key in ipairs(picks) do
-                        if Known(key) and Ready(key, unit) then return rule, key, unit end
+        if RL.allow(rule, role) then
+            if rule.proc then
+                local key = next(glowing) and GlowingProcKey()
+                if key and not (skip and skip[key]) and Ready(key) then return rule, key end
+            else
+                local unit = ResolveUnit(rule)
+                if (unit == nil and not rule.unit) or (unit and UnitExists(unit)) then
+                    if not rule.when or rule.when(c, unit) then
+                        local picks = rule.pickFn and rule.pickFn(c, unit) or rule.pick
+                        for _, key in ipairs(picks) do
+                            if not (skip and skip[key]) and Known(key) and Ready(key, unit) then return rule, key, unit end
+                        end
                     end
                 end
             end
@@ -1681,10 +1887,12 @@ hud.reason:SetJustifyH("CENTER")
 
 -- Pulso ao trocar de sugestao
 hud.pulse = hud:CreateAnimationGroup()
+do
 local grow = hud.pulse:CreateAnimation("Scale")
 grow:SetScale(1.18, 1.18); grow:SetDuration(0.10); grow:SetOrder(1)
 local shrink = hud.pulse:CreateAnimation("Scale")
 shrink:SetScale(1 / 1.18, 1 / 1.18); shrink:SetDuration(0.12); shrink:SetOrder(2)
+end
 
 -- Fundo visivel apenas quando destravado (modo de posicionamento)
 hud.mover = hud:CreateTexture(nil, "BACKGROUND", nil, -1)
@@ -1692,6 +1900,36 @@ hud.mover:SetPoint("TOPLEFT", -40, 30)
 hud.mover:SetPoint("BOTTOMRIGHT", 40, -40)
 hud.mover:SetColorTexture(0, 0.6, 1, 0.25)
 hud.mover:Hide()
+
+-- Fila "DEPOIS": as proximas habilidades que tambem estao disponiveis agora (ensina a combinacao)
+hud.q = {}
+hud.qLabel = hud:CreateFontString(nil, "OVERLAY")
+hud.qLabel:SetFont(STANDARD_TEXT_FONT, 9, "OUTLINE")
+hud.qLabel:SetPoint("BOTTOMLEFT", hud, "RIGHT", 12, 14); hud.qLabel:SetText("DEPOIS"); hud.qLabel:SetTextColor(0.7, 0.7, 0.7)
+hud.qLabel:Hide()
+for i = 1, 2 do
+    local f = CreateFrame("Frame", nil, hud)
+    f:SetSize(28, 28)
+    f:SetPoint("LEFT", hud, "RIGHT", 12 + (i - 1) * 34, -6)
+    f.border = f:CreateTexture(nil, "BACKGROUND")
+    f.border:SetPoint("TOPLEFT", -2, 2); f.border:SetPoint("BOTTOMRIGHT", 2, -2); f.border:SetColorTexture(0.55, 0.55, 0.55, 0.9)
+    f.icon = f:CreateTexture(nil, "ARTWORK")
+    f.icon:SetAllPoints(); f.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    f.key = f:CreateFontString(nil, "OVERLAY")
+    f.key:SetFont(STANDARD_TEXT_FONT, 10, "THICKOUTLINE"); f.key:SetPoint("BOTTOMRIGHT", -1, 1)
+    f:Hide()
+    hud.q[i] = f
+end
+function hud.setQueue(list)
+    local any = false
+    for i, f in ipairs(hud.q) do
+        local k = list and list[i]
+        if k and DB.queue then
+            f.icon:SetTexture(ICON[k] or 134400); f.key:SetText(GetKeybind(k)); f:Show(); any = true
+        else f:Hide() end
+    end
+    hud.qLabel:SetShown(any)
+end
 
 hud:SetScript("OnDragStart", function(self) if not DB.locked then self:StartMoving() end end)
 hud:SetScript("OnDragStop", function(self)
@@ -1847,6 +2085,17 @@ cast.def:SetPoint("RIGHT", cast.kick, "LEFT", -10, 0)
 cast.def.border:SetColorTexture(0.9, 0.3, 0.9, 0.95)
 cast.def.title:SetText("DEFESA"); cast.def.title:SetTextColor(0.95, 0.5, 0.95)
 
+cast.grp = MakeSlot(34)      -- ajuda ao grupo (curandeiro): aparece quando o cast NAO e em voce
+cast.grp:SetPoint("RIGHT", cast.def, "LEFT", -10, 0)
+cast.grp.border:SetColorTexture(0.2, 0.9, 0.35, 0.95)
+cast.grp.title:SetText("GRUPO"); cast.grp.title:SetTextColor(0.3, 1, 0.45)
+
+-- dica em texto: o que fazer enquanto o inimigo castando (muda com o seu papel)
+cast.hint = cast:CreateFontString(nil, "OVERLAY")
+cast.hint:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE")
+cast.hint:SetPoint("TOPLEFT", cast.name, "BOTTOMLEFT", 0, -2)
+cast.hint:SetWidth(230); cast.hint:SetJustifyH("LEFT"); cast.hint:SetTextColor(1, 0.95, 0.6)
+
 -- Habilidades de interrupcao e de defesa por classe (primeira conhecida e fora de recarga)
 local KICKS = {
     WARRIOR = { "PUMMEL", "SHIELD_BASH" }, ROGUE = { "KICK" }, MAGE = { "COUNTERSPELL" },
@@ -1857,6 +2106,25 @@ local DEFENSES = {
     WARRIOR = { "SHIELD_BLOCK", "SHIELD_WALL" }, ROGUE = { "EVASION" }, MAGE = { "ICE_BLOCK", "ICE_BARRIER", "MANA_SHIELD" },
     PRIEST = { "PW_SHIELD", "FADE" }, PALADIN = { "DIVINE_PROT", "DIVINE_SHIELD" }, HUNTER = { "DETERRENCE" },
     WARLOCK = { "DEATH_COIL" }, SHAMAN = { "GROUNDING" }, DRUID = { "BARKSKIN" },
+}
+
+-- Papel de tank: cooldowns de tank no lugar da defesa pessoal
+RL.TD = {
+    WARRIOR = { "SHIELD_WALL", "LAST_STAND", "SHIELD_BLOCK" },
+    PALADIN = { "TEMPLARS_BULWARK", "DIVINE_PROT", "HOLY_SHIELD" },
+    DRUID = { "BARKSKIN", "FRENZIED" },
+}
+-- Papel de cura: o que ajuda o GRUPO quando o cast nao e em voce
+RL.GH = {
+    PRIEST = { "PRAYER_OF_HEALING", "PRAYER_OF_MENDING", "PENANCE" },
+    PALADIN = { "HOLY_SHOCK", "HOLY_LIGHT" },
+    SHAMAN = { "CHAIN_HEAL", "RIPTIDE" },
+    DRUID = { "WILD_GROWTH", "SWIFTMEND", "REJUV" },
+}
+RL.HINT = {
+    dps = "Interrompa se puder. Em voce? use a defesa.",
+    tank = "Em voce? use a defesa de tank. Interrompa se puder.",
+    heal = "Prepare a cura do grupo. Em voce? use a defesa.",
 }
 
 local function FirstReady(list)
@@ -1934,7 +2202,9 @@ local function CastTick()
     end
 
     -- DEFESA: so se o cast e EM MIM e NAO e interrompivel (ambos secretos).
-    local defKey = FirstReady(DEFENSES[playerClass])
+    local role = RL.role()
+    local defKey = FirstReady((role == "tank" and RL.TD[playerClass]) or DEFENSES[playerClass])
+        or FirstReady(DEFENSES[playerClass])
     local atMe = PlayerIsSpellTarget and PlayerIsSpellTarget(unit)
     if defKey and type(atMe) ~= "nil" then
         cast.def.icon:SetTexture(ICON[defKey] or 134400)
@@ -1946,6 +2216,22 @@ local function CastTick()
     else
         cast.def:Hide()
     end
+
+    -- AJUDA AO GRUPO (papel de cura): visivel quando o cast NAO e em voce
+    local grpKey = role == "heal" and FirstReady(RL.GH[playerClass])
+    if grpKey and type(atMe) ~= "nil" then
+        cast.grp.icon:SetTexture(ICON[grpKey] or 134400)
+        cast.grp.key:SetText(GetKeybind(grpKey))
+        cast.grp:Show()
+        SetAlphaFromBool(cast.grp, atMe, 0, 1)         -- em voce -> some; em outro -> aparece
+    else
+        cast.grp:Hide()
+    end
+
+    -- dica em texto: so para elite/chefe (classificacao e dado limpo)
+    local cls = _G.UnitClassification(unit)
+    local strong = issecret(cls) or cls == "elite" or cls == "rareelite" or cls == "worldboss" or cls == "boss"
+    cast.hint:SetText(strong and (RL.HINT[role or "dps"] or "") or "")
 
     cast:Show()
 end
@@ -1959,7 +2245,6 @@ end
 -- (b) O ElvUI/EllesmereUI descobrem "esse debuff eu consigo limpar" com o filtro nativo
 --     HARMFUL|RAID_PLAYER_DISPELLABLE (a lista de auras que passa no filtro e um dado
 --     LIMPO, mesmo em combate). Aqui varremos voce e o grupo com esse filtro.
-local extra = { purgeScans = 0, purgeHits = 0, purgeErr = nil, ecasts = 0, ecastErr = nil }
 
 do  -- (a) casts de outros inimigos
     local MAXR = 3
@@ -1991,10 +2276,22 @@ do  -- (a) casts de outros inimigos
         r.def.icon:SetAllPoints(); r.def.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
         r.def.key = r.def:CreateFontString(nil, "OVERLAY")
         r.def.key:SetFont(STANDARD_TEXT_FONT, 11, "THICKOUTLINE"); r.def.key:SetPoint("BOTTOMRIGHT", -1, 1)
-        r.def:Hide(); r:Hide()
+        r.def:Hide()
+        -- ajuda ao grupo (curandeiro), ao lado da defesa
+        r.grp = CreateFrame("Frame", nil, r)
+        r.grp:SetSize(24, 24); r.grp:SetPoint("RIGHT", r.def, "LEFT", -4, 0)
+        r.grp.icon = r.grp:CreateTexture(nil, "ARTWORK")
+        r.grp.icon:SetAllPoints(); r.grp.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        r.grp.key = r.grp:CreateFontString(nil, "OVERLAY")
+        r.grp.key:SetFont(STANDARD_TEXT_FONT, 11, "THICKOUTLINE"); r.grp.key:SetPoint("BOTTOMRIGHT", -1, 1)
+        r.grp:Hide()
+        r:Hide()
         r.unit, r.expires = false, 0
         rows[i] = r
     end
+    panel.hint = panel:CreateFontString(nil, "OVERLAY")
+    panel.hint:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE")
+    panel.hint:SetPoint("TOP", panel, "BOTTOM", 0, -2); panel.hint:SetWidth(300); panel.hint:SetTextColor(1, 0.95, 0.6)
 
     local function Free(r) r.unit = false; r.expires = 0; r:Hide() end
 
@@ -2031,10 +2328,20 @@ do  -- (a) casts de outros inimigos
             end)
         end
         -- defesa: aparece so se o cast e EM VOCE e nao e interrompivel (secretos)
-        local defKey = FirstReady(DEFENSES[playerClass])
+        local role = RL.role()
+        local defKey = FirstReady((role == "tank" and RL.TD[playerClass]) or DEFENSES[playerClass])
+            or FirstReady(DEFENSES[playerClass])
         local atMe = PlayerIsSpellTarget and PlayerIsSpellTarget(unit)
         local _, _, notInt = ReadCast(unit)
-        row.def:Hide()
+        row.def:Hide(); row.grp:Hide()
+        local grpKey = role == "heal" and FirstReady(RL.GH[playerClass])
+        if grpKey and type(atMe) ~= "nil" then
+            row.grp.icon:SetTexture(ICON[grpKey] or 134400)
+            row.grp.key:SetText(GetKeybind(grpKey))
+            SetAlphaFromBool(row.grp, atMe, 0, 1)      -- cast em voce -> some; em outro -> aparece
+            row.grp:Show()
+        end
+        if strong then panel.hint:SetText(RL.HINT[role or "dps"] or "") end
         if defKey and type(atMe) ~= "nil" then
             row.def.icon:SetTexture(ICON[defKey] or 134400)
             row.def.key:SetText(GetKeybind(defKey))
@@ -2072,9 +2379,10 @@ do  -- (a) casts de outros inimigos
             if r.unit and now > r.expires then Free(r) end
             if r.unit then any = true end
         end
+        if not any then panel.hint:SetText("") end
         panel:SetShown(any)
     end
-    function extra.castsHide() panel:Hide(); for _, r in ipairs(rows) do Free(r) end end
+    function extra.castsHide() panel:Hide(); panel.hint:SetText(""); for _, r in ipairs(rows) do Free(r) end end
 end
 
 do  -- (b) debuffs do grupo que a sua classe remove
@@ -2158,6 +2466,7 @@ do  -- (b) debuffs do grupo que a sua classe remove
         return true, (ok2 and type(a) == "table") and a or nil
     end
 
+    extra.purgeSpells = Spells
     local units, last = {}, 0
     local function Group()
         wipe(units); units[1] = "player"
@@ -2170,11 +2479,14 @@ do  -- (b) debuffs do grupo que a sua classe remove
     end
 
     function extra.purgeTick()
-        if not DB.purge or not PURGE[playerClass] or UnitIsDeadOrGhost("player") then panel:Hide(); return end
+        if not DB.purge or not PURGE[playerClass] or UnitIsDeadOrGhost("player") then
+            panel:Hide(); extra.purgeFound = nil; return
+        end
         local now = GetTime()
         if now - last < 0.3 then return end
         last = now
         local n = 0
+        extra.purgeFound = nil
         for idx, unit in ipairs(Group()) do
             if n >= MAXR then break end
             if UnitExists(unit) and not UnitIsDeadOrGhost(unit) and not (idx > 1 and UnitIsUnit(unit, "player")) then
@@ -2203,6 +2515,10 @@ do  -- (b) debuffs do grupo que a sua classe remove
                         end
                         r.what:SetTextColor(1, 0.45, 0.45)
                         local typeName = aura and Pub(aura.dispelName)
+                        if n == 1 then   -- o primeiro encontrado vira a sugestao do icone principal
+                            extra.purgeFound = { unit = unit, typeName = type(typeName) == "string" and typeName or nil, name = nm }
+                            extra.purgeAt = now
+                        end
                         local list = Spells(type(typeName) == "string" and typeName or nil)
                         for s = 1, 2 do
                             local f, k = r["sp" .. s], list[s]
@@ -2294,6 +2610,7 @@ end
 
 local function HideSuggestion()
     current = nil
+    hud.setQueue(nil)
     if DB.locked then hud:Hide()
     else
         hud.icon:SetTexture(134400) -- "?" para posicionar
@@ -2351,6 +2668,14 @@ local function DoUpdate()
     if type(text) == "function" then text = text(c, unit) end
     local spell = N[key] or ""
     ShowSuggestion(key, rule.cat, (text and text ~= "" and (text .. "\n|cffaaaaaa" .. spell .. "|r")) or spell)
+    -- DEPOIS: o que mais esta disponivel agora (a combinacao que vem a seguir)
+    local skip, q = { [key] = true }, {}
+    for _ = 1, 2 do
+        local r2, k2 = Evaluate(skip)
+        if not k2 then break end
+        q[#q + 1] = k2; skip[k2] = true
+    end
+    hud.setQueue(q)
 end
 
 -- Rede de seguranca: se alguma API nova devolver algo inesperado, o addon so
@@ -2392,6 +2717,7 @@ local function RefreshSpells()
     ScanSpellbook()
     ResolveRankIDs()
     RebuildKeyCache()
+    RL.detect()          -- papel (dano/tank/cura) pelos pontos de talento
 end
 
 core:RegisterEvent("ADDON_LOADED")
@@ -2490,8 +2816,8 @@ local function Msg(text) print("|cff33ccffMVAT|r " .. text) end
 -- dourados, caixas de selecao nativas, dica ao passar o mouse, sliders com o valor ao lado,
 -- rodape com botoes, posicao lembrada e Esc fecha. So usa fontes e texturas nativas do jogo
 -- (nenhum template), entao funciona igual com ElvUI/EllesmereUI.
-do
-    local W, H = 470, 415
+extra.buildOptions = function()
+    local W, H = 470, 445
     local f = CreateFrame("Frame", "MVAT_Options", UIParent)
     f:SetSize(W, H)
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
@@ -2644,28 +2970,97 @@ do
     Check(225, -136, "Botão no minimapa", "Mostra o ícone do MVAT na borda do minimapa.|n|nClique abre estas opções; arraste para mover em volta do minimapa.", "minimap",
         function() return DB.minimap end, function(v) DB.minimap = v; extra.minimapUpdate() end)
 
-    if select(2, UnitClass("player")) == "PALADIN" then   -- playerClass so existe depois do login
-        Heading("Paladino", 225, -172)
-        local SEALS = { "auto", "furia", "retidao", "cruzado", "comando", "luz", "sabedoria", "justica" }
-        local sb = Button("", 200, 24)
-        sb:SetPoint("TOPLEFT", f, "TOPLEFT", 225, -194)
-        sb.tip, sb.optKey = "Clique para trocar o selo.|n|nAutomático: o addon escolhe pela sua arma, escudo e mana.|n|nSó aparecem os selos que você já aprendeu.", "seal"
-        sb:SetScript("OnClick", function()
-            local idx = 1
-            for i, n in ipairs(SEALS) do if n == (DB.seal or "auto") then idx = i end end
-            for step = 1, #SEALS do
-                local n = SEALS[(idx + step - 1) % #SEALS + 1]
-                local key = SEAL_PREF[n]
-                if n == "auto" or (key and Known(key)) then DB.seal = n; break end
-            end
-            Refresh()
-        end)
-        sb.refresh = function()
-            local cur = DB.seal or "auto"
-            local key = SEAL_PREF[cur]
-            sb.label:SetText(cur == "auto" and "Selo: Automático" or ("Selo: " .. ((key and N[key]) or cur)))
+    ---------------------------------------------------------------- sua classe (papel + preferencias)
+    Check(225, -158, "Mostrar próximos passos", "Ao lado do ícone aparece DEPOIS: as próximas habilidades disponíveis. Ajuda a aprender a sequência (combo).", "queue",
+        function() return DB.queue end, function(v) DB.queue = v end)
+
+    local CLS, CLSNAME = select(2, UnitClass("player")), select(1, UnitClass("player"))
+    local ROLE_NAME = { auto = "Automático", dps = "Dano", tank = "Tank", heal = "Cura" }
+    local CH = {
+        paladin_aura = { { "auto", "Automática" }, { "devotion", "Devoção" }, { "retribution", "Retribuição" },
+                         { "concentration", "Concentração" }, { "sanctity", "Santidade" }, { "fireres", "Res. Fogo" } },
+        shaman_shield = { { "auto", "Automático" }, { "lightning", "Raio" }, { "water", "Água" } },
+        mage_armor = { { "auto", "Automática" }, { "ice", "Gelo" }, { "mage", "Mágica" }, { "molten", "Derretida" } },
+        mage_spell = { { "auto", "Automática" }, { "arcane", "Arcano" }, { "fire", "Fogo" }, { "frost", "Gelo" } },
+        lock_curse = { { "auto", "Automática" }, { "elements", "Elementos" }, { "weakness", "Fraqueza" },
+                       { "recklessness", "Imprudência" }, { "none", "Nenhuma" } },
+        hunter_aspect = { { "auto", "Automático" }, { "hawk", "Falcão" }, { "monkey", "Macaco" }, { "cheetah", "Chita" },
+                          { "beast", "Fera" }, { "pack", "Alcateia" } },
+        rogue_opener = { { "auto", "Automática" }, { "ambush", "Emboscada" }, { "cheap", "Golpe Baixo" }, { "garrote", "Garrote" } },
+    }
+    -- por classe: papeis possiveis e preferencias { chave, rotulo, lista de escolhas, dica }
+    local UI = {
+        PALADIN = { roles = { "auto", "dps", "tank", "heal" }, seal = true,
+                    opts = { { "aura", "Aura", CH.paladin_aura, "Qual aura o addon lembra de manter." } } },
+        PRIEST = { roles = { "auto", "dps", "heal" } },
+        SHAMAN = { roles = { "auto", "dps", "heal" }, opts = { { "shield", "Escudo", CH.shaman_shield, "Escudo elemental a manter (Automático: Água para curar, Raio para o resto)." } } },
+        DRUID = { roles = { "auto", "dps", "tank", "heal" } },
+        WARRIOR = { roles = { "auto", "dps", "tank" } },
+        MAGE = { opts = { { "armor", "Armadura", CH.mage_armor, "Armadura a manter." },
+                          { "spell", "Magia principal", CH.mage_spell, "Qual magia usar como principal (Automático: pela especialização que você aprendeu)." } } },
+        WARLOCK = { opts = { { "curse", "Maldição", CH.lock_curse, "Maldição de utilidade a aplicar (o Bane de Agonia é separado)." } } },
+        HUNTER = { opts = { { "aspect", "Aspecto", CH.hunter_aspect, "Aspecto a manter (Automático: Falcão quando atacar de longe)." } } },
+        ROGUE = { opts = { { "opener", "Abertura", CH.rogue_opener, "Golpe para abrir o combate furtivo (Automático: Emboscada com adaga)." } } },
+    }
+    local spec = UI[CLS]
+    if spec then
+        Heading("Sua classe: " .. (CLSNAME or CLS), 225, -190)
+        local by = -212
+        local function CycleButton(labelFn, cycleFn, tip, optKey)
+            local b = Button("", 200, 24)
+            b:SetPoint("TOPLEFT", f, "TOPLEFT", 225, by); by = by - 28
+            b.tip, b.optKey = tip, optKey
+            b:SetScript("OnClick", function() cycleFn(); Refresh() end)
+            b.refresh = function() b.label:SetText(labelFn()) end
+            controls[#controls + 1] = b
         end
-        controls[#controls + 1] = sb
+        local function Next(list, cur)
+            for i, v in ipairs(list) do if v == cur then return list[i % #list + 1] end end
+            return list[1]
+        end
+        if spec.roles then
+            CycleButton(function()
+                local r = (DB.roles and DB.roles[CLS]) or "auto"
+                if r == "auto" then
+                    local eff = RL.role()
+                    return "Papel: Automático" .. (eff and (" (" .. ROLE_NAME[eff] .. ")") or "")
+                end
+                return "Papel: " .. ROLE_NAME[r]
+            end, function()
+                DB.roles = DB.roles or {}
+                DB.roles[CLS] = Next(spec.roles, DB.roles[CLS] or "auto")
+            end, "Clique para trocar.|n|nAutomático: o addon lê seus pontos de talento (e a forma de Urso do Druida).|nDano: rotação e combos.|nTank: ameaça, provocar e defesas.|nCura: curas, HoTs, limpar debuffs e ajuda ao grupo quando o chefe castar.", "role")
+        end
+        if spec.seal then
+            local SEALS = { "auto", "furia", "retidao", "cruzado", "comando", "luz", "sabedoria", "justica" }
+            CycleButton(function()
+                local cur = DB.seal or "auto"
+                local key = SEAL_PREF[cur]
+                return cur == "auto" and "Selo: Automático" or ("Selo: " .. ((key and N[key]) or cur))
+            end, function()
+                local idx = 1
+                for i, n in ipairs(SEALS) do if n == (DB.seal or "auto") then idx = i end end
+                for step = 1, #SEALS do
+                    local n = SEALS[(idx + step - 1) % #SEALS + 1]
+                    local key = SEAL_PREF[n]
+                    if n == "auto" or (key and Known(key)) then DB.seal = n; break end
+                end
+            end, "Clique para trocar o selo.|n|nAutomático: o addon escolhe pela sua arma, escudo e mana.|n|nSó aparecem os selos que você já aprendeu.", "seal")
+        end
+        for _, o in ipairs(spec.opts or {}) do
+            local key, label, choices, tip = o[1], o[2], o[3], o[4]
+            CycleButton(function()
+                local cur = (DB.opts and DB.opts[CLS] and DB.opts[CLS][key]) or "auto"
+                for _, ch in ipairs(choices) do if ch[1] == cur then return label .. ": " .. ch[2] end end
+                return label .. ": " .. choices[1][2]
+            end, function()
+                DB.opts = DB.opts or {}
+                DB.opts[CLS] = DB.opts[CLS] or {}
+                local vals = {}
+                for _, ch in ipairs(choices) do vals[#vals + 1] = ch[1] end
+                DB.opts[CLS][key] = Next(vals, DB.opts[CLS][key] or "auto")
+            end, tip .. "|n|nClique para trocar.", "opt_" .. key)
+        end
     end
 
     ---------------------------------------------------------------- tamanhos
@@ -2676,12 +3071,12 @@ do
         DB.locked = false; ApplyLayout(); HideSuggestion(); f:Hide()
     end)
 
-    Heading("Tamanho", 16, -250)
-    Slide(36, -294,"Ícone e painéis", "Arraste para mudar o tamanho do ícone e de todos os painéis.", "scale", 0.5, 3, 0.1,
+    Heading("Tamanho", 16, -280)
+    Slide(36, -324,"Ícone e painéis", "Arraste para mudar o tamanho do ícone e de todos os painéis.", "scale", 0.5, 3, 0.1,
         function() return DB.scale end, function(v) DB.scale = v; ApplyLayout() end, Pct)
-    Slide(250, -294,"Inimigos p/ modo área", "A partir de quantos inimigos o addon passa a sugerir habilidades de área (farm).", "aoe", 2, 10, 1,
+    Slide(250, -324,"Inimigos p/ modo área", "A partir de quantos inimigos o addon passa a sugerir habilidades de área (farm).", "aoe", 2, 10, 1,
         function() return DB.aoe end, function(v) DB.aoe = math.floor(v + 0.5) end, Int)
-    Slide(36, -340, "Texto do motivo", "Tamanho da letra do texto abaixo do ícone. Não muda o tamanho do ícone.", "textSize", 8, 32, 1,
+    Slide(36, -370, "Texto do motivo", "Tamanho da letra do texto abaixo do ícone. Não muda o tamanho do ícone.", "textSize", 8, 32, 1,
         function() return DB.textSize end, function(v) DB.textSize = math.floor(v + 0.5); ApplyLayout() end, Int)
 
     ---------------------------------------------------------------- rodape
@@ -2736,6 +3131,7 @@ do
         end)
     end
 end
+extra.buildOptions()
 
 ---------------------------------------------------------------------------
 -- 12. BOTAO NO MINIMAPA (clique abre as opcoes; arraste para contornar o minimapa)
@@ -2865,6 +3261,43 @@ local function Slash(input)
     elseif cmd == "casts" then
         DB.ecasts = not DB.ecasts
         Msg(DB.ecasts and "Painel de casts de outros inimigos ligado." or "Painel de casts de outros inimigos desligado.")
+    elseif cmd == "papel" or cmd == "role" then
+        local cls = select(2, UnitClass("player"))
+        local MAP = { auto = "auto", dano = "dps", dps = "dps", tank = "tank", cura = "heal", heal = "heal", healer = "heal" }
+        if not RL.TABS[cls] then Msg("Sua classe so tem o papel de dano; nao ha o que trocar.")
+        elseif not MAP[arg] then Msg("Use: /mvat papel auto | dano | tank | cura  (agora: " .. tostring(RL.role() or "auto") .. ")")
+        else
+            DB.roles = DB.roles or {}
+            DB.roles[cls] = MAP[arg]
+            Msg("Papel: " .. arg .. (MAP[arg] == "auto" and (" (detectado: " .. tostring(RL.role() or "dano") .. ")") or "") .. ".")
+        end
+    elseif cmd == "spells" or cmd == "magias" then
+        -- habilidades do seu grimorio que o addon ainda nao conhece (para eu acrescentar as regras)
+        local seen, out = {}, {}
+        for _, nm in pairs(N) do seen[nm] = true end
+        local function add(name, id)
+            name = Pub(name)
+            if name and not seen[name] then seen[name] = true; out[#out + 1] = name .. (id and (" (" .. id .. ")") or "") end
+        end
+        if C_SpellBook and C_SpellBook.GetNumSpellBookSkillLines and Enum and Enum.SpellBookSpellBank then
+            local bank = Enum.SpellBookSpellBank.Player
+            for t = 1, C_SpellBook.GetNumSpellBookSkillLines() do
+                local line = C_SpellBook.GetSpellBookSkillLineInfo(t)
+                if line then
+                    for i = line.itemIndexOffset + 1, line.itemIndexOffset + line.numSpellBookItems do
+                        local info = C_SpellBook.GetSpellBookItemInfo and C_SpellBook.GetSpellBookItemInfo(i, bank)
+                        add(C_SpellBook.GetSpellBookItemName(i, bank), info and Pub(info.spellID))
+                    end
+                end
+            end
+        end
+        Msg(#out .. " habilidades no grimorio sem regra no MVAT (me mande esta lista):")
+        local line = ""
+        for _, e in ipairs(out) do
+            if #line + #e > 170 then Msg(line); line = "" end
+            line = line .. (line == "" and "" or ", ") .. e
+        end
+        if line ~= "" then Msg(line) end
     elseif cmd == "barra" or cmd == "bar" then
         DB.barOnly = not DB.barOnly
         Msg(DB.barOnly and ("So sugere habilidades que estao nas suas barras (" .. barCount .. " encontradas).")
@@ -2877,6 +3310,7 @@ local function Slash(input)
         Msg(string.format("Barras: %d habilidades (filtro %s) | arma: %s, %.1fs | escudo: %s",
             barCount, DB.barOnly and "LIGADO" or "desligado", gear.twoHand and "duas maos" or "uma mao", gear.speed,
             gear.shield and "sim" or "nao"))
+        Msg("Papel: " .. tostring(RL.role() or "dano (classe sem outros papeis)") .. " (detectado pelos talentos: " .. tostring(RL.detected) .. ")")
         if playerClass == "PALADIN" and paladin.choose then
             local have = {}
             for _, k in ipairs(SEAL_KEYS) do if Known(k) then have[#have + 1] = (N[k] or k) .. (OnBar(N[k]) and "" or " (fora da barra)") end end
@@ -2930,7 +3364,7 @@ local function Slash(input)
         Msg("Ultimo erro capturado: " .. (lastError and tostring(lastError) or "nenhum"))
         lastError = nil -- o proximo diag mostra so erros novos
     else
-        Msg("Digite /mvat sem nada para abrir a janela de opcoes. Atalhos: lock | unlock | scale | aoe | combat | text | barra | selo | limpar | casts | test | reset | on | off | debug | diag")
+        Msg("Digite /mvat sem nada para abrir a janela de opcoes. Atalhos: lock | unlock | scale | aoe | combat | text | barra | selo | papel | spells | limpar | casts | test | reset | on | off | debug | diag")
     end
 end
 
