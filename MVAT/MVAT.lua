@@ -1137,8 +1137,15 @@ function RL.allow(rule, role)
         return tag == role
     end
     local cat = rule.cat
-    if role == "heal" then return cat ~= "ROTATION" and cat ~= "AOE" and cat ~= "COMBO" end
-    return cat ~= "HEAL"      -- dano e tank nao recebem sugestao de cura de aliado
+    local friend = RL.friend()          -- alvo aliado selecionado = voce quer curar
+    if role == "heal" then
+        -- curandeiro tambem ataca (grind, mobs): com INIMIGO no alvo mostra a rotacao de dano;
+        -- com aliado no alvo (ou sem alvo) mostra so cura/limpeza/buffs
+        if cat == "ROTATION" or cat == "AOE" or cat == "COMBO" then return (c.hostile and not friend) and true or false end
+        return true
+    end
+    -- dano/tank: sem curas de aliado, a menos que voce tenha escolhido um aliado como alvo
+    return cat ~= "HEAL" or friend
 end
 
 -- marca uma regra para um papel ("heal", "tank", "dps" ou { tank = true, dps = true })
@@ -1165,6 +1172,19 @@ function RL.hotMissing(key, dur)
     if has ~= nil then return has == false end
     local t = lastCast.at[key]
     return t == nil or (GetTime() - t) > dur
+end
+
+-- Cura no ALVO amigo selecionado. Com a vida legivel so sugere abaixo de "below"%; com a vida
+-- oculta (combate) sugere sempre, porque quem escolheu um aliado como alvo quer curar.
+function RL.targetHeal(pick, below, extra)
+    return R("HEAL", pick, function(c)
+        if not RL.friend() or (extra and not extra(c)) then return false end
+        local p = UnitPct("target")
+        return p == nil or p < below
+    end, function()
+        local p = UnitPct("target")
+        return "Cure " .. UnitLabel("target") .. (p and string.format(" (%d%%)", math.floor(p)) or "")
+    end, "target")
 end
 
 -- limpar debuff de quem esta mais a mao (usa a varredura do painel LIMPAR: funciona em combate)
@@ -1319,6 +1339,8 @@ CLASS_RULES.PRIEST = function()
         Role("heal", R("HEAL", "PW_SHIELD", function(c)
             return RL.friend() and c.inCombat and canShield(c, "target")
         end, function() return "Escudo em " .. UnitLabel("target") .. " (absorve dano)" end, "target")),
+        RL.targetHeal({ "FLASH_HEAL", "HEAL", "LESSER_HEAL" }, 50),
+        RL.targetHeal({ "GREATER_HEAL", "HEAL", "LESSER_HEAL" }, 90),
         -- CURA em combate (vida do grupo oculta): cooldowns do guia do Forever
         Role("heal", R("HEAL", "PENANCE", function(c) return c.inCombat and c.grouped end,
             "Penance (recarga 12s): cure o aliado mais ferido")),
@@ -1426,6 +1448,8 @@ CLASS_RULES.PALADIN = function()
         -- e pela ordem do guia do Forever: Holy Shock -> Flash of Light / Holy Light (Infusion of Light acende como proc)
         Role("heal", R("HEAL", "HOLY_SHOCK", function(c) return c.inCombat and c.grouped end,
             "Holy Shock (recarga curta): use em um aliado ferido - depois Flash of Light / Holy Light")),
+        RL.targetHeal("HOLY_SHOCK", 90),
+        RL.targetHeal({ "FOL", "HOLY_LIGHT" }, 90),
         -- 1) sem selo (ou acabando): aplica o melhor selo para o contexto
         R("COMBO", sealPicks, function(c)
             if not (c.hostile or c.inCombat) then return false end
@@ -1575,6 +1599,7 @@ CLASS_RULES.SHAMAN = function()
             "Riptide (recarga): HoT em um aliado ferido - depois Cura em Cadeia")),
         Role("heal", R("HEAL", "CHAIN_HEAL", function(c) return c.inCombat and c.grouped and RL.friend() end,
             "Cura em Cadeia no alvo (pula para os feridos ao lado)", "target")),
+        RL.targetHeal({ "LHW", "HEALING_WAVE" }, 90),
         Role({ dps = true }, Hit("DISPEL", "PURGE", function() return TargetHasMagicBuff() end, "Inimigo com buff magico: Expurgar")),
         Role({ dps = true }, R("BUFF", { "WINDFURY", "FLAMETONGUE", "ROCKBITER" }, function(c) return weaponMissing() end, "Encante a arma", "player")),
         R("BUFF", function()
@@ -1627,6 +1652,8 @@ CLASS_RULES.DRUID = function()
             "Swiftmend (no Forever nao consome o HoT): cura rapida no ferido")),
         Role("heal", R("HEAL", "REGROWTH", function(c) return c.inCombat and caster() and RL.friend() and RL.hotMissing("REGROWTH", 18) end,
             function() return "Regrowth em " .. UnitLabel("target") .. " (cura direta + HoT)" end, "target")),
+        RL.targetHeal("REGROWTH", 60, caster),
+        RL.targetHeal({ "HEALING_TOUCH", "REGROWTH" }, 90, caster),
         Taunt("GROWL", bear),
         -- Urso (tank)
         Hit("COMBO", "MAUL", function() return bear() and Buff("DRUID_CLEARCAST") end, "COMBO Clarividencia -> Espancar gratis"),
@@ -2121,6 +2148,8 @@ RL.GH = {
     SHAMAN = { "CHAIN_HEAL", "RIPTIDE" },
     DRUID = { "WILD_GROWTH", "SWIFTMEND", "REJUV" },
 }
+-- salvar um aliado quando o cast NAO e em voce (papeis sem cura em grupo)
+RL.AS = { PALADIN = { "BOP" }, PRIEST = { "PW_SHIELD" }, SHAMAN = { "GROUNDING" } }
 RL.HINT = {
     dps = "Interrompa se puder. Em voce? use a defesa.",
     tank = "Em voce? use a defesa de tank. Interrompa se puder.",
@@ -2189,6 +2218,11 @@ local function CastTick()
     pcall(cast.enemy.icon.SetTexture, cast.enemy.icon, tex)        -- aceita valor secreto
     pcall(cast.name.SetText, cast.name, name)                       -- aceita valor secreto
 
+    -- elite/chefe (classificacao e dado limpo): mostra SEMPRE o que voce tem pronto, so atenuado
+    -- quando nao e o caso exato; mob comum: so aparece quando faz sentido (como antes)
+    local cls = _G.UnitClassification(unit)
+    local strong = issecret(cls) or cls == "elite" or cls == "rareelite" or cls == "worldboss" or cls == "boss"
+
     -- INTERROMPER: so se eu tenho a habilidade e ela esta fora de recarga (limpo);
     -- a transparencia segue "e interrompivel?" (secreto).
     local kickKey = FirstReady(KICKS[playerClass])
@@ -2196,41 +2230,47 @@ local function CastTick()
         cast.kick.icon:SetTexture(ICON[kickKey] or 134400)
         cast.kick.key:SetText(GetKeybind(kickKey))
         cast.kick:Show()
-        SetAlphaFromBool(cast.kick, notInt, 0, 1)                   -- notInt=true -> some
+        SetAlphaFromBool(cast.kick, notInt, strong and 0.35 or 0, 1)   -- nao interrompivel: some (chefe: fica fraco)
     else
         cast.kick:Hide()
     end
 
-    -- DEFESA: so se o cast e EM MIM e NAO e interrompivel (ambos secretos).
+    -- DEFESA: mob comum: so se o cast e EM MIM e NAO e interrompivel. Chefe: sempre visivel,
+    -- forte quando e em voce (ambos os dados sao secretos: so a transparencia decide)
     local role = RL.role()
     local defKey = FirstReady((role == "tank" and RL.TD[playerClass]) or DEFENSES[playerClass])
         or FirstReady(DEFENSES[playerClass])
     local atMe = PlayerIsSpellTarget and PlayerIsSpellTarget(unit)
+    local ev = C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean
     if defKey and type(atMe) ~= "nil" then
         cast.def.icon:SetTexture(ICON[defKey] or 134400)
         cast.def.key:SetText(GetKeybind(defKey))
         cast.def:Show()
-        local ev = C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean
-        local ok = ev and pcall(function() cast.def:SetAlpha(ev(atMe, ev(notInt, 1, 0), 0)) end)
-        if not ok then SetAlphaFromBool(cast.def, atMe, 1, 0) end
+        local ok
+        if strong then
+            ok = ev and pcall(function() cast.def:SetAlpha(ev(atMe, 1, 0.5)) end)
+            if not ok then SetAlphaFromBool(cast.def, atMe, 1, 0.5) end
+        else
+            ok = ev and pcall(function() cast.def:SetAlpha(ev(atMe, ev(notInt, 1, 0), 0)) end)
+            if not ok then SetAlphaFromBool(cast.def, atMe, 1, 0) end
+        end
     else
         cast.def:Hide()
     end
 
-    -- AJUDA AO GRUPO (papel de cura): visivel quando o cast NAO e em voce
-    local grpKey = role == "heal" and FirstReady(RL.GH[playerClass])
+    -- AJUDA AO GRUPO: curandeiro -> cura em grupo; os demais -> salvar aliado (Protecao, Escudo...).
+    -- Visivel quando o cast NAO e em voce.
+    local grpKey = (role == "heal" and FirstReady(RL.GH[playerClass])) or FirstReady(RL.AS[playerClass])
     if grpKey and type(atMe) ~= "nil" then
         cast.grp.icon:SetTexture(ICON[grpKey] or 134400)
         cast.grp.key:SetText(GetKeybind(grpKey))
         cast.grp:Show()
-        SetAlphaFromBool(cast.grp, atMe, 0, 1)         -- em voce -> some; em outro -> aparece
+        SetAlphaFromBool(cast.grp, atMe, (strong and role == "heal") and 0.25 or 0, 1)
     else
         cast.grp:Hide()
     end
 
-    -- dica em texto: so para elite/chefe (classificacao e dado limpo)
-    local cls = _G.UnitClassification(unit)
-    local strong = issecret(cls) or cls == "elite" or cls == "rareelite" or cls == "worldboss" or cls == "boss"
+    -- dica em texto: so para elite/chefe
     cast.hint:SetText(strong and (RL.HINT[role or "dps"] or "") or "")
 
     cast:Show()
@@ -2334,11 +2374,11 @@ do  -- (a) casts de outros inimigos
         local atMe = PlayerIsSpellTarget and PlayerIsSpellTarget(unit)
         local _, _, notInt = ReadCast(unit)
         row.def:Hide(); row.grp:Hide()
-        local grpKey = role == "heal" and FirstReady(RL.GH[playerClass])
+        local grpKey = (role == "heal" and FirstReady(RL.GH[playerClass])) or FirstReady(RL.AS[playerClass])
         if grpKey and type(atMe) ~= "nil" then
             row.grp.icon:SetTexture(ICON[grpKey] or 134400)
             row.grp.key:SetText(GetKeybind(grpKey))
-            SetAlphaFromBool(row.grp, atMe, 0, 1)      -- cast em voce -> some; em outro -> aparece
+            SetAlphaFromBool(row.grp, atMe, (strong and role == "heal") and 0.25 or 0, 1)   -- em voce -> some; em outro -> aparece
             row.grp:Show()
         end
         if strong then panel.hint:SetText(RL.HINT[role or "dps"] or "") end
@@ -2346,8 +2386,14 @@ do  -- (a) casts de outros inimigos
             row.def.icon:SetTexture(ICON[defKey] or 134400)
             row.def.key:SetText(GetKeybind(defKey))
             local ev = C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean
-            local ok = ev and pcall(function() row.def:SetAlpha(ev(atMe, ev(notInt, 1, 0), 0)) end)
-            if not ok then SetAlphaFromBool(row.def, atMe, 1, 0) end
+            local ok
+            if strong then   -- chefe/elite: sempre visivel, forte quando e em voce
+                ok = ev and pcall(function() row.def:SetAlpha(ev(atMe, 1, 0.5)) end)
+                if not ok then SetAlphaFromBool(row.def, atMe, 1, 0.5) end
+            else
+                ok = ev and pcall(function() row.def:SetAlpha(ev(atMe, ev(notInt, 1, 0), 0)) end)
+                if not ok then SetAlphaFromBool(row.def, atMe, 1, 0) end
+            end
             row.def:Show()
         end
         -- mob comum so aparece quando mira em voce; elite/chefe aparece sempre
@@ -3241,6 +3287,21 @@ local function Slash(input)
         if key then
             testUntil = GetTime() + 5
             ShowSuggestion(key, "COMBO", "Teste do HUD (5s)\n|cffaaaaaa" .. N[key] .. "|r")
+            -- exemplo do painel de cast de chefe com as SUAS habilidades (so aprendidas)
+            local function firstKnown(list) for _, k in ipairs(list or {}) do if Known(k) then return k end end end
+            local role = RL.role()
+            local kk = firstKnown(KICKS[playerClass])
+            local dk = firstKnown((role == "tank" and RL.TD[playerClass]) or DEFENSES[playerClass]) or firstKnown(DEFENSES[playerClass])
+            local gk = (role == "heal" and firstKnown(RL.GH[playerClass])) or firstKnown(RL.AS[playerClass])
+            cast.enemy.icon:SetTexture(ICON[key] or 134400)
+            cast.name:SetText("Exemplo: feitico do chefe")
+            for _, p in ipairs({ { cast.kick, kk }, { cast.def, dk }, { cast.grp, gk } }) do
+                if p[2] then
+                    p[1].icon:SetTexture(ICON[p[2]] or 134400); p[1].key:SetText(GetKeybind(p[2])); p[1]:SetAlpha(1); p[1]:Show()
+                else p[1]:Hide() end
+            end
+            cast.hint:SetText(RL.HINT[role or "dps"] or "")
+            cast:Show()
         else Msg("Nenhuma habilidade conhecida encontrada.") end
     elseif cmd == "selo" or cmd == "seal" then
         if playerClass ~= "PALADIN" then Msg("O comando de selo e so do Paladino."); return end
@@ -3310,7 +3371,8 @@ local function Slash(input)
         Msg(string.format("Barras: %d habilidades (filtro %s) | arma: %s, %.1fs | escudo: %s",
             barCount, DB.barOnly and "LIGADO" or "desligado", gear.twoHand and "duas maos" or "uma mao", gear.speed,
             gear.shield and "sim" or "nao"))
-        Msg("Papel: " .. tostring(RL.role() or "dano (classe sem outros papeis)") .. " (detectado pelos talentos: " .. tostring(RL.detected) .. ")")
+        Msg("Papel: " .. tostring(RL.role() or "automatico") .. (RL.detected and (" (detectado pelos talentos: " .. RL.detected .. ")")
+            or " - talentos ilegiveis neste cliente: o addon decide pelo ALVO (inimigo = dano, aliado = cura)"))
         if playerClass == "PALADIN" and paladin.choose then
             local have = {}
             for _, k in ipairs(SEAL_KEYS) do if Known(k) then have[#have + 1] = (N[k] or k) .. (OnBar(N[k]) and "" or " (fora da barra)") end end

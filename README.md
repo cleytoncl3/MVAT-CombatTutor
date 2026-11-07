@@ -94,6 +94,11 @@ janela (`/mvat` → "Sua classe" → *Papel*) ou por `/mvat papel auto|dano|tank
 
 Mago, Ladino, Caçador e Bruxo são só dano e não têm escolha de papel.
 
+**Decide pelo alvo (grind e grupo):** curandeiro de forma normal (Druida, Sacerdote, Xamã, Paladino
+Sagrado) que seleciona um **inimigo** recebe a **rotação de dano** completa; ao selecionar um
+**aliado**, recebe a **cura** (HoT no alvo, cura direta, limpar debuff). Funciona mesmo quando o
+cliente não deixa ler os talentos (`/mvat debug` informa isso).
+
 ### Opções por classe (janela `/mvat` → "Sua classe")
 
 Paladino: papel, selo e aura · Sacerdote, Druida, Guerreiro: papel · Xamã: papel e escudo (Raio/Água) ·
