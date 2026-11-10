@@ -70,6 +70,22 @@ quando quiser atualizar. Para reinstalar mesmo na mesma versão: `Atualizar MVAT
 - **Aviso dentro do jogo:** os addons trocam o número da versão entre amigos no grupo/raide/guilda. Se
   alguém tiver uma versão mais nova que a sua, aparece uma mensagem pedindo para rodar o atualizador.
 
+## Compatibilidade e auditoria dos addons (10/11/2026)
+
+Conferido na pasta de addons do WoW Forever (build do cliente **1.60.1.70862**, `Interface 16001`):
+
+- **DBM 12.1.20** e **BigWigs v427.9**: são as versões mais recentes publicadas no GitHub dos dois.
+- **Nenhum dos dois traz módulos de chefes de masmorras clássicas para o Forever.** O DBM procura um
+  módulo `DBM-Party-Vanilla` que não vem no pacote; o `BigWigs_Classic` (repositório separado) não
+  declara a interface 16001 e só carrega em `classic, standard`. Por isso, nas masmorras do Forever os
+  dois só dão avisos **genéricos** de cast (o "GenericTrash" do DBM). O MVAT cobre essa lacuna com o
+  painel de casts de inimigos.
+- O MVAT segue o mesmo critério do DBM para casts de outros inimigos: só inimigos **em combate** (com
+  nova tentativa após 0,05 s) e no máximo 1 aviso por segundo para mob comum.
+- **EllesmereUI** (no lugar do ElvUI) usa os comandos nativos `ACTIONBUTTONn`/`MULTIACTIONBARxBUTTONn`;
+  a tecla mostrada no ícone continua certa. O `ForeverDungeonJournal` tem nomes, níveis e loot dos
+  chefes, mas **não** as habilidades deles.
+
 ## Janela de opções
 
 Digite **`/mvat`** (ou `/tutor`) para abrir a janela de opções, ou use **Esc → Opções → AddOns → MVAT**.
@@ -88,7 +104,7 @@ cada opção, rodapé com botões. Arraste pelo painel para mover (a posição �
 Clique em **Mover ícone e painéis** (ou desmarque "Travar posição do ícone"). A janela fecha e aparecem:
 
 - o **ícone principal** (arraste com o botão esquerdo);
-- um **retângulo azul para cada painel de aviso**: *aviso de cast* (interromper/defesa), *casts de inimigos*, *LIMPAR* e *aviso do chefe*. Cada um é arrastado e salvo **separadamente**;
+- um **retângulo azul para cada painel de aviso**: *aviso de cast* (interromper/defesa), *casts de inimigos*, *LIMPAR*, *seu debuff sem remoção* e *aviso do chefe*. Cada um é arrastado e salvo **separadamente**;
 - uma **barra no topo da tela** com o botão **Travar posições** para terminar.
 
 "Restaurar padrão" devolve tudo ao lugar original.
@@ -127,6 +143,24 @@ Mago: armadura e magia principal · Bruxo: maldição de utilidade · Caçador: 
 
 Ao lado do ícone aparecem até 2 ícones pequenos **DEPOIS**: as próximas habilidades também disponíveis
 agora. É a combinação em ordem (usa A, depois B). Desligue em "Mostrar próximos passos".
+
+### Seu debuff sem remoção (explica por que nada é sugerido)
+
+Quando você está com um debuff de **Magia, Maldição, Doença ou Veneno que a sua classe não consegue
+remover**, o addon não tem o que sugerir, então ele **avisa e explica**: mostra o ícone e o nome do
+debuff e uma linha como **"Magia: só com Cleanse (nível 42, você é 32)"**. Em combate o jogo esconde o
+tipo do debuff; o addon usa a curva de cor do próprio jogo (`GetAuraDispelTypeColor`, a mesma técnica
+do EllesmereUI) só para **mostrar** o tipo certo. Debuffs sem tipo (sangramentos, atordoamentos) não
+aparecem. Níveis em que cada classe aprende a remover (dados do treinador do Forever):
+
+| Classe | Veneno | Doença | Magia | Maldição |
+|---|---|---|---|---|
+| Paladino | Purify (8) | Purify (8) | **Cleanse (42)** | não remove |
+| Sacerdote | não remove | Cure Disease (14) | Dispel Magic (18) | não remove |
+| Druida | Abolish Poison (26) | não remove | não remove | Remove Curse (24) |
+| Xamã | Cure Poison (16) | Cure Disease (22) | não remove (Purge é ofensivo) | não remove |
+| Mago | não remove | não remove | não remove | Remove Lesser Curse (18) |
+| Guerreiro, Ladino, Caçador, Bruxo | não removem debuffs de jogador | | | |
 
 ### Limpar debuff no ícone principal
 

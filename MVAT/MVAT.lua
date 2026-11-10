@@ -1159,6 +1159,17 @@ function RL.opt(key, default)
     return v
 end
 
+-- DISPELS no Forever (nivel em que cada classe aprende a remover cada tipo de debuff).
+-- Fonte: dados do treinador do WhatsTraining (Camelot), nov/2026. { chave da habilidade, nivel }.
+-- Ex.: o Paladino remove Veneno/Doenca com Purificar (nv 8) mas Magia so com Cleanse (nv 42).
+RL.DISPEL = {
+    PALADIN = { Poison = { "PURIFY", 8 }, Disease = { "PURIFY", 8 }, Magic = { "CLEANSE", 42 } },
+    PRIEST  = { Magic = { "DISPEL_MAGIC", 18 }, Disease = { "CURE_DISEASE_P", 14 } },
+    DRUID   = { Curse = { "REMOVE_CURSE", 24 }, Poison = { "ABOLISH_POISON", 26 } },
+    SHAMAN  = { Poison = { "CURE_POISON_S", 16 }, Disease = { "CURE_DISEASE_S", 22 } },
+    MAGE    = { Curse = { "REMOVE_LESSER_CURSE", 18 } },
+}
+
 -- alvo selecionado e amigo? (curas "no alvo")
 function RL.friend()
     return UnitExists("target") and Is(_G.UnitIsFriend and _G.UnitIsFriend("player", "target"))
@@ -2335,14 +2346,28 @@ do  -- (a) casts de outros inimigos
 
     local function Free(r) r.unit = false; r.expires = 0; r:Hide() end
 
-    local function Start(unit, spellID)
+    local function Start(unit, spellID, retried)
         if not DB.ecasts then return end
         local friendly = _G.UnitCanAttack("player", unit)
         if not issecret(friendly) and not friendly then return end   -- so inimigos
         if UnitIsUnit(unit, "target") then return end                 -- o alvo ja tem o painel principal
+        -- como o DBM do Forever: so inimigos EM COMBATE (a marca atrasa um instante: 1 nova tentativa)
+        local inCombat = _G.UnitAffectingCombat(unit)
+        if not issecret(inCombat) and not inCombat then
+            if not retried and C_Timer and C_Timer.After then
+                C_Timer.After(0.05, function() pcall(Start, unit, spellID, true) end)
+            end
+            return
+        end
         local cls = _G.UnitClassification(unit)
         local strong = unit:find("^boss") ~= nil
             or issecret(cls) or cls == "elite" or cls == "rareelite" or cls == "worldboss"
+        -- mob comum: no maximo 1 aviso por segundo (evita enxurrada em pulls grandes)
+        if not strong then
+            local t = GetTime()
+            if t - (extra.lastWeak or -9) < 1 then return end
+            extra.lastWeak = t
+        end
         local row
         for _, r in ipairs(rows) do if r.unit == unit then row = r; break end end
         if not row then for _, r in ipairs(rows) do if not r.unit then row = r; break end end end
@@ -2524,13 +2549,128 @@ do  -- (b) debuffs do grupo que a sua classe remove
         return units
     end
 
+    ---------------------------------------------------------------- (c) seu debuff SEM remocao
+    -- Quando voce esta com um debuff de Magia/Maldicao/Doenca/Veneno que a sua classe NAO consegue
+    -- remover, o addon nao tem o que sugerir; aqui ele AVISA e explica (ex.: "Magia: so com Cleanse,
+    -- nivel 42"). Em combate o tipo do debuff e secreto: o jogo avalia uma curva de cor por dentro
+    -- (GetAuraDispelTypeColor, como o EllesmereUI) e o addon so MOSTRA o resultado (alfa/cor).
+    -- Tipos do motor: 1 Magia, 2 Maldicao, 3 Doenca, 4 Veneno (0 = nenhum; 9/11 = enrage/sangramento).
+    local TYPES = {
+        { 1, "Magic", "Magia", 0.35, 0.50, 1.00 }, { 2, "Curse", "Maldição", 0.70, 0.10, 0.70 },
+        { 3, "Disease", "Doença", 0.75, 0.45, 0.10 }, { 4, "Poison", "Veneno", 0.10, 0.85, 0.30 },
+    }
+    local NP = { MAXB = 2 }
+    local nop = CreateFrame("Frame", "MVAT_NoPurge", UIParent)
+    nop:SetSize(1, 1); nop:SetFrameStrata("HIGH"); nop:Hide()
+    hud.panels[#hud.panels + 1] = nop
+    hud.addMover("nopurge", "SEU DEBUFF SEM REMOÇÃO", 330, 18, nop, "TOPRIGHT", hud, "TOPLEFT", -16, 120)
+    NP.rows = {}
+    for i = 1, NP.MAXB do
+        local r = CreateFrame("Frame", nil, nop)
+        r:SetSize(330, 36); r:SetPoint("TOPRIGHT", nop, "TOPRIGHT", 0, -(i - 1) * 40)
+        r.bd = r:CreateTexture(nil, "BACKGROUND"); r.bd:SetAllPoints(); r.bd:SetColorTexture(0, 0, 0, 0.55)
+        r.ico = MakeIcon(r, 26); r.ico:SetPoint("RIGHT", r, "RIGHT", -4, 0)
+        r.name = r:CreateFontString(nil, "OVERLAY")
+        r.name:SetFont(STANDARD_TEXT_FONT, 11, "OUTLINE"); r.name:SetTextColor(1, 0.55, 0.55)
+        r.name:SetPoint("TOPRIGHT", r.ico, "TOPLEFT", -6, 1); r.name:SetWidth(290); r.name:SetJustifyH("RIGHT")
+        r.lab = {}
+        for k = 1, 4 do   -- um texto por tipo: so o do tipo real fica visivel (alfa vem da curva)
+            local fs = r:CreateFontString(nil, "OVERLAY")
+            fs:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE")
+            fs:SetPoint("BOTTOMRIGHT", r.ico, "BOTTOMLEFT", -6, -1); fs:SetWidth(290); fs:SetJustifyH("RIGHT")
+            r.lab[k] = fs
+        end
+        r:Hide(); NP.rows[i] = r
+    end
+
+    -- curvas (uma "qualquer tipo" + uma por tipo): alfa 1 so nos indices certos
+    function NP.curves()
+        if NP.cv ~= nil then return NP.cv end
+        NP.cv = false
+        local CU = _G.C_CurveUtil
+        if not (CU and CU.CreateColorCurve and _G.Enum and Enum.LuaCurveType and _G.CreateColor
+            and C_UnitAuras and C_UnitAuras.GetAuraDispelTypeColor) then return false end
+        local function build(only)
+            local c = CU.CreateColorCurve()
+            c:SetType(Enum.LuaCurveType.Step)
+            for idx = 0, 11 do
+                local on = (only and idx == only) or (not only and idx >= 1 and idx <= 4)
+                local t = TYPES[idx]
+                c:AddPoint(idx, CreateColor(t and t[4] or 1, t and t[5] or 1, t and t[6] or 1, on and 1 or 0))
+            end
+            return c
+        end
+        local ok, cv = pcall(function()
+            local x = { any = build(nil) }
+            for k = 1, 4 do x[k] = build(k) end
+            return x
+        end)
+        NP.cv = ok and cv or false
+        return NP.cv
+    end
+
+    -- texto por tipo, na medida da SUA classe e do SEU nivel (dados do treinador do Forever)
+    function NP.text(k)
+        local t = TYPES[k]
+        local d = RL.DISPEL[playerClass] and RL.DISPEL[playerClass][t[2]]
+        if not d then return t[3] .. ": a sua classe não remove" end
+        local nm = N[d[1]] or d[1]
+        local lvl = Pub(UnitLevel("player")) or 0
+        if Known(d[1]) then return t[3] .. ": use " .. nm .. " (fora de alcance?)" end
+        if lvl >= d[2] then return t[3] .. ": " .. nm .. " (nível " .. d[2] .. ") - treine no instrutor" end
+        return t[3] .. ": só com " .. nm .. " (nível " .. d[2] .. ", você é " .. lvl .. ")"
+    end
+
+    local function Pack(...) return { n = select("#", ...), ... } end
+
+    function NP.tick(enabled)
+        if not enabled then nop:Hide(); return end
+        local cv = NP.curves()
+        local slotsFn = C_UnitAuras and C_UnitAuras.GetAuraSlots
+        if not (cv and slotsFn and C_UnitAuras.GetAuraDataBySlot) then nop:Hide(); return end
+        local okH, harm = pcall(function() return Pack(slotsFn("player", "HARMFUL")) end)
+        local okD, disp = pcall(function() return Pack(slotsFn("player", "HARMFUL|RAID_PLAYER_DISPELLABLE")) end)
+        if not (okH and okD) then nop:Hide(); return end
+        local dset = {}
+        for i = 2, disp.n do if disp[i] ~= nil then dset[disp[i]] = true end end   -- [1] = token de continuacao
+        local n = 0
+        for i = 2, harm.n do
+            local slot = harm[i]
+            if slot ~= nil and not dset[slot] and n < NP.MAXB then
+                local okA, a = pcall(C_UnitAuras.GetAuraDataBySlot, "player", slot)
+                if okA and type(a) == "table" then
+                    n = n + 1
+                    local r = NP.rows[n]
+                    pcall(r.name.SetText, r.name, a.name)
+                    pcall(r.ico.icon.SetTexture, r.ico.icon, a.icon)
+                    -- a linha so aparece se o debuff TEM tipo (Magia/Maldicao/Doenca/Veneno)
+                    local okc, any = pcall(C_UnitAuras.GetAuraDispelTypeColor, "player", a.auraInstanceID, cv.any)
+                    if not (okc and any and pcall(function() r:SetAlpha(any.a) end)) then r:SetAlpha(1) end
+                    for k = 1, 4 do
+                        r.lab[k]:SetText(NP.text(k))
+                        local okk, col = pcall(C_UnitAuras.GetAuraDispelTypeColor, "player", a.auraInstanceID, cv[k])
+                        if not (okk and col and pcall(function() r.lab[k]:SetTextColor(col.r, col.g, col.b, col.a) end)) then
+                            r.lab[k]:SetTextColor(TYPES[k][4], TYPES[k][5], TYPES[k][6], 0)
+                        end
+                    end
+                    r:Show()
+                end
+            end
+        end
+        for i = n + 1, NP.MAXB do NP.rows[i]:Hide() end
+        nop:SetShown(n > 0)
+    end
+    extra.noPurge = NP
+
     function extra.purgeTick()
-        if not DB.purge or not PURGE[playerClass] or UnitIsDeadOrGhost("player") then
-            panel:Hide(); extra.purgeFound = nil; return
+        if not DB.purge or UnitIsDeadOrGhost("player") then
+            panel:Hide(); extra.purgeFound = nil; NP.tick(false); return
         end
         local now = GetTime()
         if now - last < 0.3 then return end
         last = now
+        NP.tick(true)
+        if not PURGE[playerClass] then panel:Hide(); extra.purgeFound = nil; return end   -- classe sem dispel
         local n = 0
         extra.purgeFound = nil
         for idx, unit in ipairs(Group()) do
@@ -2580,7 +2720,7 @@ do  -- (b) debuffs do grupo que a sua classe remove
         for i = n + 1, MAXR do rows[i]:Hide() end
         panel:SetShown(n > 0)
     end
-    function extra.purgeHide() panel:Hide() end
+    function extra.purgeHide() panel:Hide(); nop:Hide() end
 end
 
 function extra.tick()
