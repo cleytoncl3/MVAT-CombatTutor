@@ -361,3 +361,7 @@ MVAT/
 
 Para ajustar prioridades, edite as tabelas `CLASS_RULES.<CLASSE>` em `MVAT.lua`: as regras são
 avaliadas de cima para baixo e a primeira válida é exibida.
+
+## Licença
+
+MIT, veja [LICENSE](LICENSE).
