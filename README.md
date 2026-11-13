@@ -1,367 +1,366 @@
-# MVAT – Tutor de Combate (WoW Classic / Classic Era)
+# MVAT – Combat Tutor (WoW Classic / Classic Era)
 
-Addon **leve, universal e 100% informativo** que mostra, num ícone flutuante próprio, a habilidade
-recomendada para o momento: emergência, interrupção, dissipar, cura, provocar, combo de dano, área
-(farm) ou buff ausente — junto com a **tecla de atalho** que você usa para ela.
+A **lightweight, universal and 100% informational** addon that shows, in its own floating icon, the ability
+recommended right now: emergency, interrupt, dispel, heal, taunt, damage combo, area (farming)
+or a missing buff — together with the **key binding** you use for it.
 
-> O addon **não automatiza nada**: não lança feitiços, não clica, não altera barras de ação.
-> Ele só lê o estado do jogo e desenha um ícone.
+> The addon **automates nothing**: it does not cast spells, click or change action bars.
+> It only reads the game state and draws an icon.
 
-## Recursos
+## Features
 
-- **Todas as 9 classes do Classic** (Guerreiro, Ladino, Mago, Sacerdote, Paladino, Caçador, Bruxo,
-  Xamã, Druida), detectadas automaticamente no login (`UnitClass`).
-- **Spell IDs** + `GetSpellInfo`/`C_Spell`: funciona em cliente Português ou Inglês.
-- **Só sugere o que você já aprendeu** — o livro de feitiços é relido ao subir de nível, aprender
-  feitiço ou mudar talentos. Qualquer rank conta.
-- **Prioridades** (a primeira que se aplicar aparece):
-  1. **EMERGÊNCIA** – vida baixa (Muralha de Escudo, Bloco de Gelo, Escudo Divino, Sumir…)
-  2. **INTERROMPER** – alvo castando algo interrompível (Chute, Contrafeitiço, Choque Terreno…)
-  3. **DEFESA** – cast pesado não‑interrompível vindo em você
-  4. **DISSIPAR** – veneno/doença/maldição/magia em você ou no grupo/raide
-  5. **CURA** – aliado mais ferido do grupo (o nome e a % aparecem no texto)
-  6. **PROVOCAR** – tanque: o alvo está batendo em outro membro do grupo
-  7. **COMBO** – reage a procs e buffs: Presença da Mente → Piroblasto, Clarividência → feitiço grátis,
-     Transe Sombrio → Seta Sombria, Selo → Julgamento, pontos de combo → finalizador,
-     Sobrepujar/Revanche/Executar (reativos), Rapidez da Natureza → cura instantânea…
-  8. **ÁREA / FARM** – com vários inimigos (padrão 3+): Redemoinho, Explosão Arcana, Consagração,
-     Nevasca, Tiro Múltiplo, Chuva de Fogo, Golpe Giratório, Totem de Magma…
-  9. **DANO** – rotação básica single target (DoTs ausentes, golpe principal, filler)
-  10. **BUFF** – buffs próprios ausentes (fora de combate)
-- **Tecla de atalho** lida do mapa de bindings do jogo (`GetBindingKey`): binding direto do feitiço,
-  barras da Blizzard, ElvUI, Bartender4 e Dominos — inclusive barras de postura/forma.
-- **HUD independente** (âncora própria): não mexe no ElvUI nem nas barras padrão.
-  Travado, ele não captura cliques.
-- Posição, escala e opções salvas por **SavedVariables** (`MVAT_DB`).
+- **All 9 Classic classes** (Warrior, Rogue, Mage, Priest, Paladin, Hunter, Warlock,
+  Shaman, Druid), detected automatically at login (`UnitClass`).
+- **Spell IDs** + `GetSpellInfo`/`C_Spell`: works on Portuguese or English clients.
+- **Only suggests what you have learned** — the spellbook is read again when you level up, learn a
+  spell or change talents. Any rank counts.
+- **Priorities** (the first one that applies is shown):
+  1. **EMERGENCY** – low health (Shield Wall, Ice Block, Divine Shield, Vanish…)
+  2. **INTERRUPT** – target casting something interruptible (Kick, Counterspell, Earth Shock…)
+  3. **DEFENSE** – a heavy non-interruptible cast coming at you
+  4. **DISPEL** – poison/disease/curse/magic on you or your party/raid
+  5. **HEAL** – the most injured party member (name and % in the text)
+  6. **TAUNT** – tank: the target is hitting another party member
+  7. **COMBO** – reacts to procs and buffs: Presence of Mind → Pyroblast, Clearcasting → free spell,
+     Shadow Trance → Shadow Bolt, Seal → Judgement, combo points → finisher,
+     Overpower/Revenge/Execute (reactive), Nature's Swiftness → instant heal…
+  8. **AREA / FARM** – with several enemies (default 3+): Whirlwind, Arcane Explosion, Consecration,
+     Blizzard, Multi-Shot, Rain of Fire, Swipe, Magma Totem…
+  9. **DAMAGE** – basic single-target rotation (missing DoTs, main strike, filler)
+  10. **BUFF** – your own missing buffs (out of combat)
+- **Key binding** read from the game's binding map (`GetBindingKey`): direct spell bindings,
+  Blizzard bars, ElvUI, Bartender4 and Dominos — stance/form bars included.
+- **Independent HUD** (its own anchor): does not touch ElvUI or the default bars.
+  When locked, it does not catch clicks.
+- Position, scale and options saved in **SavedVariables** (`MVAT_DB`).
 
-## Instalação
+## Install
 
-1. Feche o jogo (ou faça logout).
-2. Baixe este repositório: **Code → Download ZIP** (ou `git clone`).
-3. Copie **a pasta `MVAT`** (a que contém `MVAT.toc` e `MVAT.lua`) para:
+1. Close the game (or log out).
+2. Download this repository: **Code → Download ZIP** (or `git clone`).
+3. Copy **the `MVAT` folder** (the one with `MVAT.toc` and `MVAT.lua`) to:
    - `World of Warcraft\_classic_era_\Interface\AddOns\` (Classic Era / Hardcore / SoD)
-   - ou `World of Warcraft\_classic_\Interface\AddOns\` (Classic progressão)
+   - or `World of Warcraft\_classic_\Interface\AddOns\` (Classic progression)
 
-   O resultado deve ser `...\Interface\AddOns\MVAT\MVAT.toc`.
-   **Não** copie a pasta `MVAT-main` inteira — o nome da pasta precisa ser `MVAT`.
-4. Abra o jogo, na tela de personagens clique em **AddOns** e marque **MVAT – Tutor de Combate**.
-   Se aparecer "Desatualizado", marque **Carregar AddOns desatualizados**.
-5. Entre no jogo. Você verá: `MVAT carregado para <classe>`.
+   The result must be `...\Interface\AddOns\MVAT\MVAT.toc`.
+   Do **not** copy the whole `MVAT-main` folder — the folder name must be `MVAT`.
+4. Open the game, click **AddOns** at the character screen and tick **MVAT – Combat Tutor**.
+   If it says "Out of date", tick **Load out of date AddOns**.
+5. Log in. You will see: `MVAT loaded for <class>`.
 
-**Dica:** ative as placas de nome de inimigos (tecla **V**) — o addon usa elas para contar quantos
-mobs estão em combate e ativar as sugestões de área/farm.
+**Tip:** turn on enemy nameplates (key **V**) — the addon uses them to count how many
+mobs are in combat and to turn on the area/farm suggestions.
 
-## Atualizar sem baixar ZIP toda hora (Windows)
+## Updating without downloading the ZIP every time (Windows)
 
-Dentro da pasta do addon vem o arquivo **`Atualizar MVAT.bat`**. **Duplo clique** nele:
+The addon folder comes with **`Atualizar MVAT.bat`**. **Double-click** it:
 
-1. acha a pasta do WoW Forever sozinho (ou pergunta uma vez e lembra);
-2. compara a versão instalada com a do GitHub (`## Version` no `MVAT.toc`);
-3. se houver versão nova, baixa e atualiza a pasta do addon (as configurações ficam salvas);
-4. mostra **"Pronto! ... digite /reload no jogo"**.
+1. it finds the WoW Forever folder by itself (or asks once and remembers it);
+2. it compares the installed version with the one on GitHub (`## Version` in `MVAT.toc`);
+3. if there is a new version, it downloads it and updates the addon folder (your settings are kept);
+4. it shows **"Done! ... type /reload in game"**.
 
-**Primeira instalação:** baixe o ZIP do repositório (Code → Download ZIP), abra a pasta `MVAT` de dentro
-dele e dê duplo clique em `Atualizar MVAT.bat`. Ele instala no jogo para você. Depois é só repetir
-quando quiser atualizar. Para reinstalar mesmo na mesma versão: `Atualizar MVAT.bat force` no terminal.
+**First install:** download the repository ZIP (Code → Download ZIP), open the `MVAT` folder inside it
+and double-click `Atualizar MVAT.bat`. It installs the addon for you. After that, run it again
+whenever you want to update. To reinstall the same version: `Atualizar MVAT.bat force` in a terminal.
 
-- O Windows pode mostrar o aviso azul "SmartScreen" na primeira vez (arquivo baixado da internet): clique em
-  **Mais informações → Executar assim mesmo**. O arquivo é texto simples e pode ser lido antes.
-- Precisa de internet e do repositório público. O código do atualizador está dentro do próprio `.bat`.
-- **Aviso dentro do jogo:** os addons trocam o número da versão entre amigos no grupo/raide/guilda. Se
-  alguém tiver uma versão mais nova que a sua, aparece uma mensagem pedindo para rodar o atualizador.
+- Windows may show the blue "SmartScreen" warning the first time (file downloaded from the internet): click
+  **More info → Run anyway**. The file is plain text and can be read first.
+- It needs internet access and the public repository. The updater code is inside the `.bat` itself.
+- **In-game notice:** the addons exchange their version number between friends in party/raid/guild. If
+  someone has a newer version than yours, a message asks you to run the updater.
 
-## Compatibilidade e auditoria dos addons (10/11/2026)
+## Compatibility and addon audit (2026-11-10)
 
-Conferido na pasta de addons do WoW Forever (build do cliente **1.60.1.70862**, `Interface 16001`):
+Checked in the WoW Forever addon folder (client build **1.60.1.70862**, `Interface 16001`):
 
-- **DBM 12.1.20** e **BigWigs v427.9**: são as versões mais recentes publicadas no GitHub dos dois.
-- **Nenhum dos dois traz módulos de chefes de masmorras clássicas para o Forever.** O DBM procura um
-  módulo `DBM-Party-Vanilla` que não vem no pacote; o `BigWigs_Classic` (repositório separado) não
-  declara a interface 16001 e só carrega em `classic, standard`. Por isso, nas masmorras do Forever os
-  dois só dão avisos **genéricos** de cast (o "GenericTrash" do DBM). O MVAT cobre essa lacuna com o
-  painel de casts de inimigos.
-- O MVAT segue o mesmo critério do DBM para casts de outros inimigos: só inimigos **em combate** (com
-  nova tentativa após 0,05 s) e no máximo 1 aviso por segundo para mob comum.
-- **EllesmereUI** (no lugar do ElvUI) usa os comandos nativos `ACTIONBUTTONn`/`MULTIACTIONBARxBUTTONn`;
-  a tecla mostrada no ícone continua certa. O `ForeverDungeonJournal` tem nomes, níveis e loot dos
-  chefes, mas **não** as habilidades deles.
+- **DBM 12.1.20** and **BigWigs v427.9** are the latest versions published on GitHub for both.
+- **Neither ships boss modules for the classic dungeons on Forever.** DBM looks for a
+  `DBM-Party-Vanilla` module that is not in the package; `BigWigs_Classic` (a separate repository) does not
+  declare interface 16001 and only loads on `classic, standard`. So in Forever dungeons both only give
+  **generic** cast warnings (DBM's "GenericTrash"). MVAT fills that gap with the
+  enemy cast panel.
+- MVAT follows the same rule as DBM for casts from other enemies: only enemies **in combat** (with
+  a new attempt after 0.05 s) and at most 1 warning per second for a normal mob.
+- **EllesmereUI** (instead of ElvUI) uses the native `ACTIONBUTTONn`/`MULTIACTIONBARxBUTTONn` commands;
+  the key shown on the icon is still right. `ForeverDungeonJournal` has boss names, levels and loot,
+  but **not** their abilities.
 
-## Janela de opções
+## Options window
 
-Digite **`/mvat`** (ou `/tutor`) para abrir a janela de opções, ou use **Esc → Opções → AddOns → MVAT**.
-O visual segue o do Leatrix: painel escuro com pergaminho, duas colunas, dica ao passar o mouse sobre
-cada opção, rodapé com botões. Arraste pelo painel para mover (a posição é lembrada); **Esc** fecha.
+Type **`/mvat`** (or `/tutor`) to open the options window, or use **Esc → Options → AddOns → MVAT**.
+The look follows Leatrix: dark panel with parchment, two columns, a tooltip when you hover each
+option, and a footer with buttons. Drag the panel to move it (the position is remembered); **Esc** closes it.
 
-- **Geral:** addon ativo, mostrar só em combate, mostrar o motivo, só habilidades da barra, travar posição.
-- **Painéis:** LIMPAR (debuffs do grupo) e casts de chefes e elites.
-- **Paladino:** botão que troca o selo (automático ou fixo; só os selos que você tem).
-- **Tamanho:** sliders de tamanho do ícone/painéis (50% a 300%), de inimigos para o modo área e do **texto abaixo do ícone** (8 a 32, independente do ícone).
-- **Rodapé:** Restaurar padrão, Testar ícone e Fechar.
-- **Botão no minimapa:** liga/desliga o ícone do MVAT na borda do minimapa (clique abre as opções, botão direito liga/desliga o addon, arraste para contornar o minimapa; funciona com minimapa quadrado).
+- **General:** addon on, show only in combat, show the reason, only abilities on your bars, lock position.
+- **Panels:** DISPEL (party debuffs) and boss and elite casts.
+- **Paladin:** a button that switches the seal (automatic or fixed; only the seals you have).
+- **Size:** sliders for the icon/panel size (50% to 300%), the enemy count for area mode and the **text under the icon** (8 to 32, separate from the icon).
+- **Footer:** Restore defaults, Test icon and Close.
+- **Minimap button:** turns the MVAT icon on the minimap edge on or off (click opens the options, right-click turns the addon on or off, drag to move it around the minimap; works with a square minimap).
 
-### Mover o ícone e os painéis
+### Moving the icon and panels
 
-Clique em **Mover ícone e painéis** (ou desmarque "Travar posição do ícone"). A janela fecha e aparecem:
+Click **Move icon and panels** (or untick "Lock icon position"). The window closes and you get:
 
-- o **ícone principal** (arraste com o botão esquerdo);
-- um **retângulo azul para cada painel de aviso**: *aviso de cast* (interromper/defesa), *casts de inimigos*, *LIMPAR*, *seu debuff sem remoção* e *aviso do chefe*. Cada um é arrastado e salvo **separadamente**;
-- uma **barra no topo da tela** com o botão **Travar posições** para terminar.
+- the **main icon** (drag with the left button);
+- a **blue rectangle for each warning panel**: *cast warning* (interrupt/defense), *enemy casts*, *DISPEL*, *your debuff you can't remove* and *boss warning*. Each one is dragged and saved **separately**;
+- a **bar at the top of the screen** with a **Lock positions** button to finish.
 
-"Restaurar padrão" devolve tudo ao lugar original.
+"Restore defaults" puts everything back in its original place.
 
-Os comandos abaixo continuam funcionando como atalhos.
+The commands below still work as shortcuts.
 
-## Modo tutor: papéis, combinações e ajuda em combate
+## Tutor mode: roles, combos and help in combat
 
-Feito para quem está aprendendo: o addon diz **o que usar agora**, **o que vem depois** e **por quê**.
+Made for players who are learning: the addon says **what to use now**, **what comes next** and **why**.
 
-### Papel (dano / tank / cura)
+### Role (damage / tank / healer)
 
-Em **Sacerdote, Paladino, Xamã, Druida e Guerreiro** o addon mostra só o que serve ao seu papel. O
-papel é detectado pelos **pontos de talento** (Druida Feral: Urso = tank, Gato = dano) ou escolhido na
-janela (`/mvat` → "Sua classe" → *Papel*) ou por `/mvat papel auto|dano|tank|cura`.
+For **Priest, Paladin, Shaman, Druid and Warrior** the addon only shows what fits your role. The
+role is detected from your **talent points** (Feral Druid: Bear = tank, Cat = damage) or chosen in the
+window (`/mvat` → "Your class" → *Role*) or with `/mvat papel auto|dano|tank|cura`.
 
-| Papel | O que aparece |
+| Role | What shows up |
 |---|---|
-| **Cura** | curas de recarga e HoTs, **manter o HoT no alvo amigo** (Renovar, Rejuvenescimento, Lifebloom, Riptide), limpar debuff do grupo, buffs, ajuda ao grupo quando o chefe castar. Sem habilidades de dano. |
-| **Tank** | postura/forma/selo de tank, ameaça, provocar (Rugido/Righteous Defense/Provocar), defesas grandes (Templar's Bulwark, Muralha de Escudo, Pele de Árvore…). |
-| **Dano** | rotação e combos. Sem curas de aliado. |
+| **Healer** | cooldown heals and HoTs, **keeping the HoT on your friendly target** (Renew, Rejuvenation, Lifebloom, Riptide), party dispels, buffs, group help when the boss casts. No damage abilities. |
+| **Tank** | tank stance/form/seal, threat, taunt (Growl/Righteous Defense/Taunt), big defensives (Templar's Bulwark, Shield Wall, Barkskin…). |
+| **Damage** | rotation and combos. No heals on allies. |
 
-Mago, Ladino, Caçador e Bruxo são só dano e não têm escolha de papel.
+Mage, Rogue, Hunter and Warlock are damage only and have no role choice.
 
-**Decide pelo alvo (grind e grupo):** curandeiro de forma normal (Druida, Sacerdote, Xamã, Paladino
-Sagrado) que seleciona um **inimigo** recebe a **rotação de dano** completa; ao selecionar um
-**aliado**, recebe a **cura** (HoT no alvo, cura direta, limpar debuff). Funciona mesmo quando o
-cliente não deixa ler os talentos (`/mvat debug` informa isso).
+**Decides by target (grinding and groups):** a healer in normal form (Druid, Priest, Shaman, Holy
+Paladin) who targets an **enemy** gets the full **damage rotation**; targeting an **ally** gives the
+**healing** (HoT on the target, direct heal, dispel). It works even when the client does not let the addon
+read talents (`/mvat debug` tells you).
 
-### Opções por classe (janela `/mvat` → "Sua classe")
+### Class options (window `/mvat` → "Your class")
 
-Paladino: papel, selo e aura · Sacerdote, Druida, Guerreiro: papel · Xamã: papel e escudo (Raio/Água) ·
-Mago: armadura e magia principal · Bruxo: maldição de utilidade · Caçador: aspecto · Ladino: abertura.
+Paladin: role, seal and aura · Priest, Druid, Warrior: role · Shaman: role and shield (Lightning/Water) ·
+Mage: armor and main spell · Warlock: utility curse · Hunter: aspect · Rogue: opener.
 
-### DEPOIS (próximos passos)
+### NEXT (next steps)
 
-Ao lado do ícone aparecem até 2 ícones pequenos **DEPOIS**: as próximas habilidades também disponíveis
-agora. É a combinação em ordem (usa A, depois B). Desligue em "Mostrar próximos passos".
+Next to the icon, up to 2 small **NEXT** icons show the next abilities that are also available
+now. That is the combo in order (use A, then B). Turn it off with "Show next steps".
 
-### Seu debuff sem remoção (explica por que nada é sugerido)
+### Your debuff you can't remove (why nothing is suggested)
 
-Quando você está com um debuff de **Magia, Maldição, Doença ou Veneno que a sua classe não consegue
-remover**, o addon não tem o que sugerir, então ele **avisa e explica**: mostra o ícone e o nome do
-debuff e uma linha como **"Magia: só com Cleanse (nível 42, você é 32)"**. Em combate o jogo esconde o
-tipo do debuff; o addon usa a curva de cor do próprio jogo (`GetAuraDispelTypeColor`, a mesma técnica
-do EllesmereUI) só para **mostrar** o tipo certo. Debuffs sem tipo (sangramentos, atordoamentos) não
-aparecem. Níveis em que cada classe aprende a remover (dados do treinador do Forever):
+When you have a **Magic, Curse, Disease or Poison** debuff that your class **cannot remove**, the addon has
+nothing to suggest, so it **warns and explains**: it shows the debuff icon and name and a line such as
+**"Magic: only with Cleanse (level 42, you are 32)"**. In combat the game hides the debuff type; the
+addon uses the game's own color curve (`GetAuraDispelTypeColor`, the same technique as EllesmereUI)
+only to **show** the right type. Debuffs without a type (bleeds, stuns) do not show up. Levels at which
+each class learns to remove them (Forever trainer data):
 
-| Classe | Veneno | Doença | Magia | Maldição |
+| Class | Poison | Disease | Magic | Curse |
 |---|---|---|---|---|
-| Paladino | Purify (8) | Purify (8) | **Cleanse (42)** | não remove |
-| Sacerdote | não remove | Cure Disease (14) | Dispel Magic (18) | não remove |
-| Druida | Abolish Poison (26) | não remove | não remove | Remove Curse (24) |
-| Xamã | Cure Poison (16) | Cure Disease (22) | não remove (Purge é ofensivo) | não remove |
-| Mago | não remove | não remove | não remove | Remove Lesser Curse (18) |
-| Guerreiro, Ladino, Caçador, Bruxo | não removem debuffs de jogador | | | |
+| Paladin | Purify (8) | Purify (8) | **Cleanse (42)** | can't remove |
+| Priest | can't remove | Cure Disease (14) | Dispel Magic (18) | can't remove |
+| Druid | Abolish Poison (26) | can't remove | can't remove | Remove Curse (24) |
+| Shaman | Cure Poison (16) | Cure Disease (22) | can't remove (Purge is offensive) | can't remove |
+| Mage | can't remove | can't remove | can't remove | Remove Lesser Curse (18) |
+| Warrior, Rogue, Hunter, Warlock | can't remove player debuffs | | | |
 
-### Limpar debuff no ícone principal
+### Dispel on the main icon
 
-O painel LIMPAR mostra quem do grupo tem debuff; além disso o **ícone principal** passa a sugerir
-**"Limpar <nome>"** com a sua habilidade de dispel (funciona em combate, pelo filtro nativo
-`RAID_PLAYER_DISPELLABLE`; o jogo esconde o tipo do debuff em combate, então o addon sugere a sua
-habilidade de limpeza disponível para aquele alvo).
+The DISPEL panel shows who in your group has a debuff; on top of that the **main icon** suggests
+**"Dispel <name>"** with your dispel ability (works in combat, through the native filter
+`RAID_PLAYER_DISPELLABLE`; the game hides the debuff type in combat, so the addon suggests your
+dispel ability available for that target).
 
-### Cast de chefe: o que fazer
+### Boss cast: what to do
 
-Quando um chefe/elite casta, o painel mostra o que o jogo libera (nome, ícone, alvo do cast) e **uma
-dica por papel**:
+When a boss/elite casts, the panel shows what the game allows (name, icon, cast target) and **one
+tip per role**:
 
-- **Dano:** "Interrompa se puder. Em você? use a defesa." (ícones de interromper e defesa)
-- **Tank:** defesa de **tank** no lugar da defesa pessoal.
-- **Cura:** ícone **GRUPO** (cura em grupo: Prayer of Healing, Chain Heal, Wild Growth, Holy Shock…)
-  que aparece quando o cast **não** é em você, e a defesa pessoal quando é. Funciona também com o
-  chefe sem estar no seu alvo (a linha "casts de outros inimigos" lê `boss1-5` e as nameplates).
+- **Damage:** "Interrupt if you can. On you? use your defensive." (interrupt and defensive icons)
+- **Tank:** a **tank** defensive instead of the personal one.
+- **Healer:** a **GROUP** icon (group heal: Prayer of Healing, Chain Heal, Wild Growth, Holy Shock…)
+  that shows when the cast is **not** on you, and your personal defensive when it is. It also works with the
+  boss not targeted (the "other enemy casts" line reads `boss1-5` and the nameplates).
 
-> Limite do jogo: o Forever esconde a vida do grupo e o nome/tipo do feitiço em combate. O addon
-> **mostra** esses dados (alfa dos ícones), mas não consegue decidir por eles. Por isso a cura em
-> combate é guiada por recarga e HoT no alvo, e não por "quem está com menos vida".
+> Game limit: Forever hides group health and the spell name/type in combat. The addon
+> **shows** that data (icon alpha) but cannot decide based on it. That is why healing in
+> combat is driven by cooldowns and the HoT on your target, not by "who has the least health".
 
-### Fontes usadas para montar as regras
+### Sources used to build the rules
 
-Guias e notas do WoW Forever (set–nov/2026): Warcraft Tavern (classes e páginas de cada classe,
-atualizado em 3 nov), Games.gg (novas habilidades por classe), notas dos próprios addons do Forever
-(WhatsTraining, TalentsForeverBook, ForeverAuras). As habilidades de talento novas (Riptide, Wild
-Growth, Templar's Bulwark, Mangle de urso, Lifebloom) só são reconhecidas se o ID do Classic/TBC
-bater com o do Forever; `/mvat spells` lista o que está no seu grimório sem regra para eu acrescentar.
+WoW Forever guides and notes (Sep–Nov 2026): Warcraft Tavern (classes and each class page,
+updated Nov 3), Games.gg (new abilities by class), notes from Forever's own addons
+(WhatsTraining, TalentsForeverBook, ForeverAuras). New talent abilities (Riptide, Wild
+Growth, Templar's Bulwark, bear Mangle, Lifebloom) are only recognized when the Classic/TBC ID
+matches the Forever one; `/mvat spells` lists what is in your spellbook without a rule so it can be added.
 
-## Comandos de chat (`/mvat` ou `/tutor`)
+## Chat commands (`/mvat` or `/tutor`)
 
-| Comando | Efeito |
+| Command | Effect |
 |---|---|
-| `/mvat` | Abre/fecha a janela de opções (também: `/mvat opcoes`, `config`, `menu`) |
-| `/mvat unlock` | Destrava: arraste o ícone com o botão esquerdo |
-| `/mvat lock` | Trava e salva a posição |
-| `/mvat scale 1.5` | Tamanho do ícone (0.5 a 3) |
-| `/mvat aoe 3` | Quantos inimigos ativam o modo área/farm (2 a 10) |
-| `/mvat combat` | Liga/desliga "mostrar só em combate" |
-| `/mvat text` | Liga/desliga o texto explicativo abaixo do ícone |
-| `/mvat barra` | Liga/desliga "só sugerir habilidades que estão nas suas barras" (padrão: ligado) |
-| `/mvat selo <nome>` | Paladino: fixa um selo (`retidao`, `furia`, `cruzado`, `comando`, `luz`, `sabedoria`, `justica`) ou volta ao `auto` |
-| `/mvat papel <auto\|dano\|tank\|cura>` | Escolhe o seu papel (Sacerdote, Paladino, Xamã, Druida, Guerreiro) |
-| `/mvat spells` | Lista as habilidades do seu grimório que o addon ainda não conhece |
-| `/mvat limpar` | Liga/desliga o painel LIMPAR (debuffs do grupo que você remove) |
-| `/mvat casts` | Liga/desliga o painel de casts de outros inimigos (chefe, elites) |
-| `/mvat test` | Mostra um ícone de teste por 5 segundos |
-| `/mvat reset` | Restaura posição e opções padrão |
-| `/mvat on` / `/mvat off` | Ativa / desativa o addon |
-| `/mvat debug` | Mostra classe, n. de regras e habilidades reconhecidas |
-| `/mvat diag` | Mostra o que o jogo escondeu no último combate (vida, recurso, auras) e o último erro capturado |
+| `/mvat` | Opens/closes the options window (also: `/mvat opcoes`, `config`, `menu`) |
+| `/mvat unlock` | Unlocks: drag the icon with the left button |
+| `/mvat lock` | Locks and saves the position |
+| `/mvat scale 1.5` | Icon size (0.5 to 3) |
+| `/mvat aoe 3` | How many enemies turn on area/farm mode (2 to 10) |
+| `/mvat combat` | Toggles "show only in combat" |
+| `/mvat text` | Toggles the explanation text under the icon |
+| `/mvat barra` | Toggles "only suggest abilities on your bars" (default: on) |
+| `/mvat selo <name>` | Paladin: fixes a seal (`retidao`, `furia`, `cruzado`, `comando`, `luz`, `sabedoria`, `justica`) or goes back to `auto` |
+| `/mvat papel <auto\|dano\|tank\|cura>` | Picks your role (Priest, Paladin, Shaman, Druid, Warrior) |
+| `/mvat spells` | Lists the abilities in your spellbook the addon doesn't know yet |
+| `/mvat limpar` | Toggles the DISPEL panel (party debuffs you can remove) |
+| `/mvat casts` | Toggles the panel of casts from other enemies (boss, elites) |
+| `/mvat test` | Shows a test icon for 5 seconds |
+| `/mvat reset` | Restores the default position and options |
+| `/mvat on` / `/mvat off` | Turns the addon on / off |
+| `/mvat debug` | Shows class, number of rules and recognized abilities |
+| `/mvat diag` | Shows what the game hid in the last fight (health, resource, auras) and the last error caught |
 
-## Como ler o HUD
+## Reading the HUD
 
-- **Borda colorida + rótulo em cima**: categoria (vermelho = emergência, laranja = interromper,
-  roxo = dissipar, verde = cura, dourado = combo, azul = área, cinza = dano, ciano = buff).
-- **Texto grande no canto do ícone**: sua tecla de atalho (ex.: `E`, `Shift+2`, `F1`).
-  Se estiver vazio, a habilidade não está em nenhuma barra com atalho.
-- **Texto abaixo**: o motivo da sugestão e o nome da habilidade.
+- **Colored border + label on top**: category (red = emergency, orange = interrupt,
+  purple = dispel, green = heal, gold = combo, blue = area, gray = damage, cyan = buff).
+- **Big text in the icon corner**: your key binding (e.g. `E`, `Shift+2`, `F1`).
+  If it is empty, the ability is not on any bar with a binding.
+- **Text below**: the reason for the suggestion and the ability name.
 
-## WoW Forever: valores secretos
+## WoW Forever: secret values
 
-O Forever usa o motor moderno do WoW, que esconde de addons várias informações durante o combate
-("valores secretos": vida, recursos, auras, recargas…) e proíbe o log de combate. O MVAT:
+Forever uses the modern WoW engine, which hides several pieces of information from addons during combat
+("secret values": health, resources, auras, cooldowns…) and forbids the combat log. MVAT:
 
-- **não usa** o log de combate (evita o aviso "só disponível para a interface da Blizzard");
-- checa cada valor antes de usar: o que vier secreto é tratado como "desconhecido" e a regra que
-  dependia dele simplesmente não dispara — sem erros de Lua;
-- regras do tipo "buff/DoT ausente" só aparecem quando o addon tem **certeza** de que ele está ausente;
-- em combate, a fonte principal é o **brilho de proc da própria Blizzard**
-  (`SPELL_ACTIVATION_OVERLAY_GLOW_SHOW`): quando uma habilidade acende (Sobrepujar, Executar,
-  Revanche, procs de talento), o MVAT mostra o ícone dela com a sua tecla;
-- quando o alvo inicia um cast, o aviso de interromper aparece mesmo se o nome do feitiço estiver oculto.
+- **does not use** the combat log (avoids the "only available to the Blizzard UI" warning);
+- checks every value before using it: anything secret is treated as "unknown" and the rule that
+  depended on it simply doesn't fire — no Lua errors;
+- "missing buff/DoT" rules only show up when the addon is **sure** it is missing;
+- in combat, the main source is **Blizzard's own proc glow**
+  (`SPELL_ACTIVATION_OVERLAY_GLOW_SHOW`): when an ability lights up (Overpower, Execute,
+  Revenge, talent procs), MVAT shows its icon with your key;
+- when the target starts a cast, the interrupt warning shows up even if the spell name is hidden.
 
-Por isso, em combate, as sugestões podem ser bem menos frequentes que fora dele. Use `/mvat diag`
-depois de uma luta para ver o que o jogo liberou.
+So in combat, suggestions can be much less frequent than outside it. Use `/mvat diag`
+after a fight to see what the game allowed.
 
-### Só o que está na sua barra
+### Only what is on your bars
 
-O MVAT lê as suas barras de ação (inclusive ElvUI/EllesmereUI, que usam os mesmos slots) e **só sugere
-habilidades que você consegue apertar**. Com as barras vazias o filtro é ignorado. `/mvat barra` liga e
-desliga. Habilidades de outros níveis só entram quando você as aprende (o livro de feitiços é relido).
+MVAT reads your action bars (including ElvUI/EllesmereUI, which use the same slots) and **only suggests
+abilities you can press**. With empty bars the filter is ignored. `/mvat barra` toggles it.
+Abilities of other levels only show up once you learn them (the spellbook is read again).
 
-### Paladino (regras do Forever)
+### Paladin (Forever rules)
 
-O Forever tem um Paladino diferente do Classic Era, e o MVAT segue as notas de mudanças dos addons do próprio
-Forever (TalentsForeverBook / WhatsTraining):
+Forever has a different Paladin from Classic Era, and MVAT follows the change notes of Forever's own addons
+(TalentsForeverBook / WhatsTraining):
 
-- **Selo escolhido pelo contexto**, entre os que você tem **e estão na barra**, com o motivo na tela:
-  escudo equipado ou Fúria Justa ativa → **Selo da Fúria** ("o selo de tanque": dano Sagrado + absorção);
-  arma lenta ou de duas mãos → **Comando** (a partir do nível 30); mana baixa → **Sabedoria**; caso
-  contrário **Retidão**. O Cruzado só aparece se for o único que sobrou; a Justiça só com `/mvat selo justica`.
-- **Antes da luta**, se o selo ativo não é o que o contexto pede, ele sugere trocar.
-- **Julgamento não gasta mais o selo** (recarga de 10 s, alcance de 10 m; julgar a Fúria provoca o alvo): o
-  MVAT não manda mais refazer o selo depois do Julgamento.
-- **Golpe Sagrado** (recarga de 10 s), Exorcismo em morto-vivo/demônio, Consagração com vários inimigos,
-  Fúria Justa quando há escudo, aura de Devoção (tanque) ou Retribuição (dano) e bênçãos.
-- O estado do selo é rastreado pelos seus próprios casts e pela duração real vista nas auras, porque em
-  combate o Forever esconde as auras.
+- **Seal chosen by context**, among the ones you have **and that are on your bars**, with the reason on screen:
+  shield equipped or Righteous Fury active → **Seal of Fury** ("the tank seal": Holy damage + absorb);
+  slow or two-handed weapon → **Command** (from level 30); low mana → **Wisdom**; otherwise
+  **Righteousness**. Crusader only shows up if it is the only one left; Justice only with `/mvat selo justica`.
+- **Before the fight**, if the active seal is not the one the context asks for, it suggests switching.
+- **Judgement no longer consumes the seal** (10 s cooldown, 10 m range; judging Fury taunts the target): MVAT
+  no longer asks you to reapply the seal after Judgement.
+- **Holy Strike** (10 s cooldown), Exorcism on undead/demons, Consecration with several enemies,
+  Righteous Fury with a shield, Devotion (tank) or Retribution (damage) aura and blessings.
+- The seal state is tracked through your own casts and the real duration seen on auras, because in
+  combat Forever hides auras.
 
-### Outras classes (habilidades e regras do Forever)
+### Other classes (Forever abilities and rules)
 
-Os IDs e as habilidades novas vêm da lista de treinador do próprio Forever (WhatsTraining/Camelot) e das notas
-de mudanças (TalentsForeverBook). Cada classe usa o que existe no Forever:
+The IDs and the new abilities come from Forever's own trainer list (WhatsTraining/Camelot) and the change
+notes (TalentsForeverBook). Each class uses what exists in Forever:
 
-| Classe | Habilidades do Forever usadas |
+| Class | Forever abilities used |
 |---|---|
-| Guerreiro | Investida (abertura), Vitória Rápida, Golpe Poderoso (15 s), Ira Sangrenta no início da luta, Temeridade em elite, Trovoada |
-| Ladino | Abertura furtiva (Emboscada se tiver adaga; senão Golpe Baixo/Garrote), Esfaquear com adaga, Ruptura em elite |
-| Mago | Arcane Blast (especialização Arcana), Ice Lance após Nova Congelante, Onda Explosiva |
-| Sacerdote | Penance, Prayer of Mending, Shadow Word: Death (só com vida alta), Nova Sagrada |
-| Caçador | Tiro Mirado/Múltiplo (recarga compartilhada), Contra-ataque |
-| Bruxo | Bane da Agonia separado da Maldição, Dreno de Vida, Conflagrar, Fogo da Alma em elite |
-| Xamã | Fire Nova (agora uma magia de 10 s), Corrente de Raios |
-| Druida | Lacerar (urso), Pounce/Ravage (gato em Rondar) |
+| Warrior | Charge (opener), Victory Rush, Mighty Strike (15 s), Bloodrage at the start of the fight, Recklessness on elites, Thunder Clap |
+| Rogue | Stealth opener (Ambush with a dagger; otherwise Cheap Shot/Garrote), Backstab with a dagger, Rupture on elites |
+| Mage | Arcane Blast (Arcane spec), Ice Lance after Frost Nova, Blast Wave |
+| Priest | Penance, Prayer of Mending, Shadow Word: Death (only at high health), Holy Nova |
+| Hunter | Aimed/Multi-Shot (shared cooldown), Counterattack |
+| Warlock | Bane of Agony separate from the Curse, Drain Life, Conflagrate, Soul Fire on elites |
+| Shaman | Fire Nova (now a 10 s spell), Chain Lightning |
+| Druid | Lacerate (bear), Pounce/Ravage (cat while Prowling) |
 
-Em combate o Forever esconde **auras do alvo, Raiva/Energia e pontos de combo**. Para continuar sugerindo:
+In combat Forever hides **target auras, Rage/Energy and combo points**. To keep suggesting:
 
-- **DoTs** (Dilacerar, Corrupção, Imolar, Fogo Lunar...) são rastreados pelo **tempo desde o seu último cast**
-  (zera ao trocar de alvo); com auras legíveis, vale a aura real.
-- **Pontos de combo** são contados pelos seus casts (cada gerador soma, cada finalizador zera).
-- **Raiva/Energia desconhecidas**: o addon assume que há recurso (o jogo recusa se faltar).
-- **Cura em combate** é limitada: a vida dos aliados é secreta, então curas por "vida baixa" só aparecem fora
-  de combate; Prayer of Mending e afins aparecem por recarga.
+- **DoTs** (Rend, Corruption, Immolate, Moonfire...) are tracked by the **time since your last cast**
+  (reset when you change targets); when auras are readable, the real aura wins.
+- **Combo points** are counted from your casts (each builder adds, each finisher resets).
+- **Unknown Rage/Energy**: the addon assumes you have the resource (the game refuses if you don't).
+- **Healing in combat** is limited: ally health is secret, so "low health" heals only show up out
+  of combat; Prayer of Mending and the like show up by cooldown.
 
-### Painel de cast (o que o inimigo está castando)
+### Cast panel (what the enemy is casting)
 
-O jogo não deixa um addon **ler** o nome do feitiço do inimigo em combate, mas deixa **mostrá-lo**
-(`SetText`/`SetTexture` aceitam valor secreto) e controlar a transparência de um ícone por um
-booleano secreto (`SetAlphaFromBoolean`). É a mesma técnica da barra de cast do EllesmereUI. Quando o
-alvo castar, aparece um painel acima do ícone principal:
+The game doesn't let an addon **read** the enemy spell name in combat, but it lets it **show** it
+(`SetText`/`SetTexture` accept secret values) and control an icon's transparency with a
+secret boolean (`SetAlphaFromBoolean`). It is the same technique as EllesmereUI's cast bar. When the
+target casts, a panel shows up above the main icon:
 
-- **INIMIGO**: ícone e nome do que ele está castando (exibidos, nunca comparados);
-- **INTERROMPER**: sua interrupção + tecla, só se ela existe e está fora de recarga (`isActive`);
-  o ícone some sozinho se o cast **não** for interrompível;
-- **DEFESA**: sua defesa + tecla, só aparece se o cast é **em você** e **não** é interrompível.
+- **ENEMY**: icon and name of what it is casting (shown, never compared);
+- **INTERRUPT**: your interrupt + key, only if you have it and it is off cooldown (`isActive`);
+  the icon disappears by itself if the cast is **not** interruptible;
+- **DEFENSE**: your defensive + key, only shows up if the cast is **on you** and **not** interruptible.
 
-Por isso o addon **não** sabe *qual* feitiço é, e não escolhe a skill pelo nome dele. Escolhe pelo
-*tipo* (interrompível, em você).
+So the addon does **not** know *which* spell it is, and it doesn't pick the ability by its name. It picks
+by *type* (interruptible, on you).
 
-### Combos pela sua última skill
+### Combos from your last ability
 
-Os seus próprios casts continuam legíveis (`UNIT_SPELLCAST_SUCCEEDED` do jogador), então "usei A →
-use B" funciona sem auras: Presença da Mente → Piroblasto, Selo → Julgamento, Corrupção → Imolar →
-Seta Sombria, Marca → Picada → Tiro Arcano, Foco Interior → cura grande etc. Veja `SEQUENCES` em
+Your own casts stay readable (`UNIT_SPELLCAST_SUCCEEDED` for the player), so "used A →
+use B" works without auras: Presence of Mind → Pyroblast, Seal → Judgement, Corruption → Immolate →
+Shadow Bolt, Mark → Sting → Arcane Shot, Inner Focus → big heal and so on. See `SEQUENCES` in
 `MVAT.lua`.
 
-### Aviso do chefe
+### Boss warning
 
-Se o cliente enviar `ENCOUNTER_WARNING` (o sistema que o DBM/BigWigs usam em Midnight), o MVAT mostra
-o texto, o ícone e a severidade do aviso. `/mvat diag` informa se esse evento existe no seu cliente.
+If the client sends `ENCOUNTER_WARNING` (the system DBM/BigWigs use in Midnight), MVAT shows
+the warning text, icon and severity. `/mvat diag` tells you whether that event exists in your client.
 
-### Casts de outros inimigos (chefe, elites, quem mira em você)
+### Casts from other enemies (boss, elites, whoever targets you)
 
-O painel de cast principal olha o seu **alvo**. Como o DBM faz no Forever, o MVAT também escuta o cast
-de qualquer inimigo (nameplates e `boss1-5`) e mostra, acima do painel principal, nome e ícone da
-magia (valores secretos: só exibição) e o **alvo do cast**. Elite e chefe aparecem sempre; mob comum só
-aparece quando o cast é **em você**. Se o cast em você não for interrompível, aparece o ícone da sua
-defesa. O painel some quando o cast termina ou é interrompido. `/mvat casts` liga/desliga.
+The main cast panel looks at your **target**. Like DBM does on Forever, MVAT also listens to casts
+from any enemy (nameplates and `boss1-5`) and shows, above the main panel, the spell name and icon
+(secret values: display only) and the **cast target**. Elites and bosses always show; a normal mob only
+shows when the cast is **on you**. If the cast on you is not interruptible, your defensive icon
+shows. The panel disappears when the cast ends or is interrupted. `/mvat casts` toggles it.
 
-### LIMPAR: debuffs do grupo que você remove
+### DISPEL: party debuffs you can remove
 
-Painel à esquerda do ícone principal, com você e o grupo/raide (até 4 linhas): quem está afetado, o
-nome e o ícone do debuff e **a(s) sua(s) habilidade(s) de limpeza com a tecla**. Funciona em combate
-com o filtro nativo `HARMFUL|RAID_PLAYER_DISPELLABLE` (o mesmo que ElvUI e EllesmereUI usam): o jogo
-diz "este debuff você consegue remover" sem revelar o tipo. Quando o tipo está oculto e a sua classe
-remove mais de um tipo, o painel mostra uma habilidade por tipo (no máximo 2). Jogadores fora de
-alcance de dispel (`UnitInRange`) são ignorados. Classes sem dispel (Guerreiro, Ladino, Caçador,
-Bruxo) não mostram o painel. `/mvat limpar` liga/desliga.
+A panel to the left of the main icon, with you and your party/raid (up to 4 lines): who is affected, the
+debuff name and icon and **your dispel ability (or abilities) with the key**. It works in combat
+with the native filter `HARMFUL|RAID_PLAYER_DISPELLABLE` (the same one ElvUI and EllesmereUI use): the game
+says "you can remove this debuff" without revealing its type. When the type is hidden and your class
+removes more than one type, the panel shows one ability per type (at most 2). Players out of
+dispel range (`UnitInRange`) are ignored. Classes without a dispel (Warrior, Rogue, Hunter,
+Warlock) don't show the panel. `/mvat limpar` toggles it.
 
-| Classe | Remove |
+| Class | Removes |
 |---|---|
-| Paladino | Veneno, Doença, Magia (Purificar / Expurgar) |
-| Sacerdote | Magia (Dissipar), Doença (Abolir/Curar Doença) |
-| Mago | Maldição (Remover Maldição Menor) |
-| Xamã | Veneno, Doença (Curar Veneno / Doença) |
-| Druida | Maldição, Veneno (Remover Maldição, Abolir/Curar Veneno) |
+| Paladin | Poison, Disease, Magic (Purify / Cleanse) |
+| Priest | Magic (Dispel), Disease (Abolish/Cure Disease) |
+| Mage | Curse (Remove Lesser Curse) |
+| Shaman | Poison, Disease (Cure Poison / Disease) |
+| Druid | Curse, Poison (Remove Curse, Abolish/Cure Poison) |
 
-## Limitações conhecidas
+## Known limitations
 
-- O painel LIMPAR depende de o cliente aceitar o filtro `RAID_PLAYER_DISPELLABLE`; `/mvat diag` mostra
-  quantas leituras e quantos debuffs removíveis foram vistos, e o último erro.
+- The DISPEL panel depends on the client accepting the `RAID_PLAYER_DISPELLABLE` filter; `/mvat diag` shows
+  how many reads and how many removable debuffs were seen, and the last error.
+- **Pet** abilities (Felhunter's Spell Lock, Intimidation) are not suggested.
+- The addon doesn't know whether you are **behind** the target; Backstab/Shred only show up through procs.
+- Heals name the ally in the text — the heal target is still your choice.
+- On clients where the enemy cast API is limited, the addon uses the combat log as a fallback.
 
-- Habilidades de **pet** (Bloqueio de Feitiço do Caçador de Vil, Intimidação) não são sugeridas.
-- O addon não sabe se você está **atrás** do alvo; Apunhalar/Retalhar só aparecem via proc.
-- Curas apontam o aliado pelo nome no texto — o alvo da cura continua sendo escolha sua.
-- Em clientes onde a API de casts de inimigos é limitada, o addon usa o combat log como reserva.
-
-## Estrutura
+## Structure
 
 ```
 MVAT/
-  MVAT.toc   – metadados e SavedVariables
-  MVAT.lua   – compatibilidade de API, spellbook, keybinds, contexto, regras por classe, motor e HUD
+  MVAT.toc   – metadata and SavedVariables
+  MVAT.lua   – API compatibility, spellbook, key bindings, context, class rules, engine and HUD
 ```
 
-Para ajustar prioridades, edite as tabelas `CLASS_RULES.<CLASSE>` em `MVAT.lua`: as regras são
-avaliadas de cima para baixo e a primeira válida é exibida.
+To adjust priorities, edit the `CLASS_RULES.<CLASS>` tables in `MVAT.lua`: rules are
+checked from top to bottom and the first valid one is shown.
 
-## Licença
+## License
 
-MIT, veja [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).
